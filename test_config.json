@@ -1,10 +1,10 @@
 {
-  "schemaVersion": "v5.4.0.0",
-  "appVersion": "v5.4.0.0",
+  "schemaVersion": "v5.4.0.2",
+  "appVersion": "v5.4.0.2",
   "qrShareUrl": "https://zko-spravochnik.github.io/test-cartoteka/",
   "shareAppText": "Сохраните этот контакт! А чтобы скачать весь Справочник округа Бәйтерек себе на телефон и бесплатно искать мастеров, такси и магазины без интернета, переходите по ссылке:",
   "qrMode": "admin-configured",
-  "generatedAt": "2026-10-24",
+  "generatedAt": "2026-10-26",
   "region": "Западно-Казахстанская область",
   "district": "Район Байтерек",
   "regions": [
@@ -1939,7 +1939,7 @@
     "oldPath": "backups/old backup",
     "newPath": "backups/backup"
   },
-  "intakeWebhookUrl": "https://script.google.com/macros/s/AKfycbzr49pGt1lwvwtL29FmkzS5fEMP0gGzyJARCwJ5GBfYeXqse1xD0THrOa_t2oLdJLLYSA/exec",
+  "intakeWebhookUrl": "https://script.google.com/macros/s/AKfycbzJwuyI_ixPJdlLOVf1Vth1SC8eLACf-mXr03JjupV45bCTvt43CfL0Wek_wiYqAvYoaA/exec",
   "intakeSheetName": "Baiterek_Ochered_2026",
   "branch": "main",
   "ignored_pairs": [],
