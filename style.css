@@ -674,13 +674,13 @@ body.dark .phone-fixed.grey{background:#243040;color:#9fb0c6}
 #addCancel.add-cancel-big{min-height:58px!important;border-radius:20px!important;padding:16px 20px!important;font-size:16px!important;font-weight:900;width:100%;margin-top:4px}
 
 /* ===== v5.4.0.0: пастельная радуга, плашки названий, симметрия «Назад», золотой VIP, защита текста карточки ===== */
-.hue-red{--hue-bg:#fbd9d7;--hue-bd:#f0b4b0}
-.hue-orange{--hue-bg:#fde4c9;--hue-bd:#f3c997}
-.hue-green{--hue-bg:#daf2d6;--hue-bd:#b6dfb0}
-.hue-sky{--hue-bg:#d3f0f7;--hue-bd:#a9dcea}
-.hue-blue{--hue-bg:#d5e0f8;--hue-bd:#aabfec}
-.hue-violet{--hue-bg:#e7dcf7;--hue-bd:#cbb6ec}
-.hue-sand{--hue-bg:#efe9dc;--hue-bd:#d9cfb8}
+.hue-red{--hue-bg:#fdefed;--hue-bd:#f4d3d0}
+.hue-orange{--hue-bg:#fef4e8;--hue-bd:#f6e0c4}
+.hue-green{--hue-bg:#f0f9ee;--hue-bd:#d3eacf}
+.hue-sky{--hue-bg:#ecf8fb;--hue-bd:#cbe8f1}
+.hue-blue{--hue-bg:#eef2fc;--hue-bd:#d0dcf3}
+.hue-violet{--hue-bg:#f5f0fc;--hue-bd:#e0d4f3}
+.hue-sand{--hue-bg:#f7f4ed;--hue-bd:#e6dfcf}
 .pastel-tile[class*="hue-"],body.dark .pastel-tile[class*="hue-"]{background:var(--hue-bg)!important;border-color:var(--hue-bd)!important;color:#1f2933!important}
 .pastel-tile[class*="hue-"] small,body.dark .pastel-tile[class*="hue-"] small{color:#4b5563!important}
 .title-plaque{display:block;width:100%;box-sizing:border-box;text-align:center;margin:6px 0 10px;padding:12px 16px;border-radius:18px;font-weight:950;font-size:18px;line-height:1.25;background:var(--hue-bg,#efe9dc);border:1px solid var(--hue-bd,#d9cfb8);color:#1f2933;box-shadow:0 4px 12px rgba(59,70,82,.08)}
@@ -719,3 +719,179 @@ body.dark .cnt-res{border-color:#6f97c9;color:#aabfec}
 @keyframes pocketDrop{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
 .category-folder .back-capsule.back-wide{width:100%!important;display:flex!important;justify-content:center;align-items:center}
 .rest-pocket{margin-top:12px}
+
+/* ===== v5.4.0.1: плашка-подтверждение сверху ===== */
+.top-banner{position:fixed;left:50%;top:max(10px,env(safe-area-inset-top,0px));transform:translate(-50%,-140%);z-index:2000;width:min(560px,calc(100vw - 24px));box-sizing:border-box;padding:13px 16px;border-radius:14px;background:#1f6b3a;color:#fff;font-weight:800;font-size:15px;line-height:1.35;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.28);opacity:0;pointer-events:none;transition:transform .25s ease,opacity .25s ease}
+.top-banner.show{transform:translate(-50%,0);opacity:1}
+.top-banner.bad{background:#a23b2a}
+
+/* ===== v5.4.0.1: карточки целиком в цвете своей супер-плитки, VIP-бейдж слева ===== */
+.card.card-hue{background:var(--hue-bg);border-color:var(--hue-bd)}
+body.dark .card.card-hue{background:color-mix(in srgb,var(--hue-bg) 13%,#1c2733);border-color:color-mix(in srgb,var(--hue-bd) 40%,#2b3a4a)}
+.biz-link.hue-bound[class*="hue-"]{background:var(--hue-bg);border:1px solid var(--hue-bd);color:#1f2933}
+body.dark .biz-link.hue-bound[class*="hue-"]{background:color-mix(in srgb,var(--hue-bg) 13%,#1c2733);color:var(--ink)}
+.biz-card-modal .card.card-hue{margin-top:0}
+.vip-badge{display:inline-block;vertical-align:middle;margin:0 14px 4px 4px;padding:3px 11px;border-radius:999px;font-size:13px;font-weight:950;letter-spacing:.04em;line-height:1.3;color:#4a2f00;background:linear-gradient(135deg,#fff3b0,#ffc61a);border:2px solid #8a5a00;box-shadow:0 2px 4px rgba(90,60,0,.35);transform:rotate(-15deg);transform-origin:left center;white-space:nowrap}
+.vip-crown{display:none!important}
+
+/* ===== v5.4.0.1: заявка на VIP ===== */
+.vip-apply{display:block;width:100%;box-sizing:border-box;min-height:54px;margin:14px 0 4px;padding:13px 14px;border:2px solid #b07a00!important;border-radius:16px!important;font-weight:950;font-size:16px;text-align:center;color:#3d2800!important;background:linear-gradient(135deg,#fff0a6 0%,#ffd84a 55%,#ffc21a 100%)!important;box-shadow:0 6px 16px rgba(196,140,0,.28)}
+.vip-village{font-weight:900;padding:8px 2px}
+.vip-tariffs{border:1px solid var(--line);border-radius:14px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;margin:0}
+.vip-tariffs legend{font-weight:900;padding:0 6px}
+.vip-tariff{display:flex;align-items:center;gap:10px;font-weight:800;min-height:44px}
+.vip-tariff input{width:22px;height:22px;flex:0 0 auto}
+.vip-apply{position:relative}
+.vip-apply .vip-apply-text{display:block;padding-left:44px}
+.vip-badge.mini{position:absolute;left:8px;top:-9px;margin:0;font-size:12px;padding:2px 9px}
+.add-choice .vip-apply{margin:0}
+.vip-rule{border:2px solid #d99a00;border-radius:14px;background:linear-gradient(135deg,#fff8d6,#ffeaa0);color:#3d2800;padding:12px 14px;font-weight:700;font-size:14px;line-height:1.45}
+body.dark .vip-rule{background:#4a3d22;color:#fff6dc}
+.vip-tariff{border:1px solid var(--line);border-radius:12px;padding:6px 12px}
+
+/* v5.4.0.3: единое поле пути к secrets.txt и вертикальный список найденных кодов (без таблиц, под узкий экран) */
+.secrets-box{display:flex;flex-direction:column;gap:10px;margin-top:6px}
+.secrets-box input[type=text]{width:100%;min-height:48px;border:1px solid var(--line);border-radius:14px;padding:0 14px;font-size:15px;background:var(--card,#fff);color:var(--ink)}
+.admin-dark .secrets-box input[type=text]{background:#0e1626;border-color:#2b4268;color:#e8eefc}
+.secrets-result{display:flex;flex-direction:column;gap:6px}
+.secrets-result:empty{display:none}
+.sec-row{display:flex;flex-direction:column;gap:2px;padding:8px 12px;border-radius:12px;border:1px solid var(--line);background:#eefaf0;font-size:14px}
+.sec-row b{font-size:15px;letter-spacing:1px;word-break:break-word}
+.sec-row.miss{background:#fdefed}
+.admin-dark .sec-row{background:#12301f;border-color:#2b6a44;color:#dff7e6}
+.admin-dark .sec-row.miss{background:#3a1a1a;border-color:#7a3030;color:#ffd9d6}
+#pushGas{min-height:46px}
+
+/* v1.0.0.0: VIP — крупное окно-предупреждение, список тарифов кнопками, подсказка про ID */
+.vip-tariff-list{display:flex;flex-direction:column;gap:10px}
+.vip-tariff-btn{width:100%;min-height:54px;border-radius:16px;border:1px solid #e0c36a;background:#fff4cc;color:#6b4e00;font-size:17px;font-weight:900;padding:10px 14px;text-align:left}
+.vip-warn h2,.vip-result h2{font-size:24px;font-weight:950}
+.vip-warn-text{font-size:19px;font-weight:800;line-height:1.5;margin:12px 0}
+.vip-warn-actions{display:flex;flex-direction:column;gap:10px}
+.vip-id-help{font-size:15px;font-weight:700;line-height:1.45;padding:10px 12px;border-radius:12px;background:#eef4ff;color:#1d3a6e}
+.vip-chosen{font-size:16px;font-weight:900;padding:10px 12px;border-radius:12px;background:#fff4cc;color:#6b4e00;border:1px solid #e0c36a}
+.vip-result.vip-ok h2{color:#1b7a3a}.vip-result.vip-no h2{color:#b3261e}
+body.dark .vip-tariff-btn,body.dark .vip-chosen{background:#4a3a0a;color:#ffe9a6;border-color:#a8832a}
+body.dark .vip-id-help{background:#1a2a4a;color:#cfe0ff}
+body.dark .vip-warn-text{color:#f2f5ff}
+
+/* v1.0.0.0: ночная тема — яркие контрастные плашки категорий, насыщенно-тёмные коммерческие карточки,
+   яркий жирный график работы (раньше всё сливалось в глухой серый) */
+body.dark .hue-red{--dk-bg:#ff9d94;--dk-fg:#3a0905;--dk-card:#4f2220;--dk-bd:#ff7b6f}
+body.dark .hue-orange{--dk-bg:#ffbf6b;--dk-fg:#3a2000;--dk-card:#4d3015;--dk-bd:#ff9f3a}
+body.dark .hue-green{--dk-bg:#62e29c;--dk-fg:#04301a;--dk-card:#1d4a35;--dk-bd:#3fc17c}
+body.dark .hue-sky{--dk-bg:#6fd0ff;--dk-fg:#05283d;--dk-card:#173f55;--dk-bd:#3ab4ee}
+body.dark .hue-blue{--dk-bg:#92b6ff;--dk-fg:#0a1f4d;--dk-card:#1f3466;--dk-bd:#6a97f5}
+body.dark .hue-violet{--dk-bg:#c9a9ff;--dk-fg:#25104a;--dk-card:#38265e;--dk-bd:#a47cf0}
+body.dark .hue-sand{--dk-bg:#f2d68f;--dk-fg:#3a2a05;--dk-card:#4a3d1f;--dk-bd:#d9b45a}
+body.dark .title-plaque[class*="hue-"]{background:var(--dk-bg)!important;color:var(--dk-fg)!important;border:2px solid var(--dk-bd)!important;font-weight:950}
+body.dark .card.card-hue{background:var(--dk-card)!important;border-color:var(--dk-bd)!important}
+body.dark .card.card-hue .card-desc,body.dark .card.card-hue .card-subtitle{color:#f1f5fb!important}
+body.dark .card.card-hue .id-line{color:#dbe6f4!important}
+body.dark .schedule-line,body.dark .card.card-hue .schedule-line{color:#ffe08a!important;font-weight:900;font-size:15px}
+
+/* v1.0.0.0: ШТОРКА ХЕДЕРА. Плашка добавления короче справа, в углу в одну линию — язычок. */
+.header-add-zone{justify-content:stretch}
+.header-add-row{display:flex;align-items:stretch;gap:6px;width:100%}
+.header-add-row .header-add{flex:1 1 auto;min-width:0;width:auto}
+.header-toggle{flex:0 0 46px;width:46px;min-height:52px;border-radius:14px;border:1px solid var(--line);background:#e8eef7;color:#1d3a6e;font-size:18px;line-height:1;padding:0;box-shadow:0 6px 16px rgba(50,70,90,.12)}
+body.dark .header-toggle{background:#2b4056;color:#e9f0f6;border-color:#3b5470}
+.header-folder{max-height:320px;overflow:hidden;transition:max-height .38s ease,opacity .3s ease,margin .3s ease}
+body.hdr-collapsed .header-folder{max-height:0;opacity:0;margin:0;pointer-events:none}
+body.hdr-collapsed #searchRow{margin-top:2px}
+.header{transition:padding .3s ease}
+
+/* v1.0.0.0: значки плиток трёх уровней */
+.pastel-tile{position:relative}
+.tile-folder-corner{position:absolute;top:6px;left:8px;font-size:15px;opacity:.28;pointer-events:none}
+.tile-count{display:inline-flex;align-items:center;justify-content:center;gap:4px}
+.tile-folder-inline{font-size:13px}
+.tile3-foot{display:grid!important;grid-template-columns:auto 1fr auto;align-items:center;gap:6px;width:100%;margin-top:6px}
+.tile3-foot .foot-id{font-size:20px;line-height:1;justify-self:start}
+.tile3-foot .foot-count{justify-self:center;text-align:center;font-weight:850}
+.tile3-foot .foot-go{font-size:18px;font-weight:900;justify-self:end;line-height:1}
+
+/* v1.0.0.0: два замка пульта, бейдж режима, нижний ряд плиток */
+.mode-badge{display:block;width:100%;margin:8px 0;padding:10px 12px;border-radius:12px;border:2px solid;font-weight:700;font-size:14px;text-align:center}
+.mode-badge.ro{background:#fff4d6;color:#7a4b00;border-color:#e6b84d}
+.mode-badge.rw{background:#dff5e1;color:#14532d;border-color:#5cb86c}
+.admin-dark .admin-grid button.locked,.admin-pockets button.locked{opacity:.55}
+.master-overlay{position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px}
+.master-box{width:100%;max-width:420px;background:#1c1f26;color:#f2f2f2;border-radius:16px;padding:18px;box-sizing:border-box}
+.master-box h3{margin:0 0 8px}
+.master-box input[type=text],.master-box input[type=password]{width:100%;box-sizing:border-box;margin:8px 0}
+.tile3-foot{display:flex;align-items:center;justify-content:space-between;gap:6px}
+
+/* v1.0.0.0: пульт из 5 кнопок + карман, блоки чатов под SOS, кнопка «Добавить ссылку» */
+.admin-top5{display:grid;gap:8px;margin:8px 0}
+.admin-top5 button{width:100%;padding:12px;font-size:16px;border-radius:12px}
+.eng-toggle{display:block;width:100%;margin:10px 0;padding:11px 12px;border-radius:12px;border:1px dashed #8a8f99;background:transparent;color:inherit;font-weight:700;font-size:13px;text-align:left}
+.eng-pocket{border:1px dashed #8a8f99;border-radius:12px;padding:8px;margin-bottom:10px}
+.eng-pocket.hidden{display:none}
+.chat-blocks{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}
+.chat-block{padding:12px 6px;border-radius:14px;border:0;font-weight:700;font-size:14px;color:#fff;cursor:pointer}
+.chat-block.wa{background:#1fa855}
+.chat-block.tg{background:#2481cc}
+.chat-list{display:grid;gap:8px;margin:10px 0}
+.chat-item{display:block;position:relative;padding:12px 34px 12px 12px;border-radius:12px;text-decoration:none;color:#fff}
+.chat-item.wa{background:#1fa855}
+.chat-item.tg{background:#2481cc}
+.chat-item b{display:block;font-size:15px}
+.chat-item small{display:block;opacity:.92;margin-top:2px}
+.chat-go{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:18px}
+.chat-add-btn{background:linear-gradient(90deg,#1fa855,#2481cc);color:#fff;border:0;border-radius:14px;padding:12px;font-weight:700;font-size:15px}
+
+/* v1.0.0.0: экран чатов — крупные карточки */
+.chat-card{display:block;text-decoration:none;color:inherit;padding:16px 56px 16px 16px;min-height:84px}
+.chat-card h3{margin:0 0 6px 0!important}
+.chat-card .chat-desc{margin:4px 0 0;font-size:16px;line-height:1.4}
+.chat-card .chat-go{position:absolute;right:16px;top:50%;transform:translateY(-50%);font-size:26px;font-weight:800;opacity:.75}
+
+/* v1.0.0.0: заморозка шапки выбора посёлков и окно полной строки */
+.geo-sticky-head{position:sticky;top:-18px;z-index:6;margin:-18px -18px 10px;padding:16px 18px 10px;background:var(--card);border-bottom:1px solid var(--line,#e3dccf)}
+.geo-sticky-head h2{margin:0}
+.row-viewer{z-index:100000}
+.row-viewer-box{max-width:520px;max-height:88vh;overflow:auto}
+.rv-raw{font-family:ui-monospace,Consolas,monospace;font-size:15px;line-height:1.5;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;background:#050c18;color:#bfe0ff;border:1px solid #234a7c;border-radius:12px;padding:10px;margin:8px 0}
+.rv-fields{display:grid;gap:4px;margin-bottom:8px}
+.rv-f{display:flex;gap:8px;font-size:15px;line-height:1.4;overflow-wrap:anywhere}
+.rv-f b{flex:0 0 38px;color:#7fb4ff}
+.rv-f span{flex:1}
+
+/* v1.0.0.0: шесть кнопок очереди и двухцветный радар правок */
+.queue-row-actions.q-six{grid-template-columns:repeat(2,minmax(0,1fr))}
+.queue-row-actions.q-six button:disabled{opacity:.38;cursor:not-allowed}
+.queue-row-mono{white-space:pre-wrap!important;word-break:break-word!important;overflow-wrap:anywhere;overflow-x:visible}
+.df-cap{margin:8px 0 2px;font-size:12px;font-weight:800;opacity:.8}
+.df-old{background:#ffd6d6;color:#8a1c1c;border-radius:4px;padding:0 3px;text-decoration:line-through;text-decoration-thickness:1px}
+.df-new{background:#7fe08f;color:#0c3a14;border-radius:4px;padding:0 3px;font-weight:800}
+.df-same{background:#fff;color:#223;border-radius:4px;padding:0 3px}
+.rv-f.df-old{background:#ffd6d6;color:#8a1c1c;text-decoration:none;border-radius:8px}
+.rv-f.df-new{background:#7fe08f;color:#0c3a14;border-radius:8px}
+.rv-f{padding:2px 6px;border-radius:8px;background:#fff;color:#223}
+.rv-f b{color:#2b5fb3}
+.rv-edit input{flex:1;min-width:0;font-size:15px;padding:6px 8px;border:1px solid #9bb;border-radius:8px;background:#fff;color:#111}
+.rv-edit input.df-new{background:#7fe08f;color:#0c3a14;font-weight:800}
+.rv-msg{color:#ff9a9a;font-weight:700;margin:6px 0;min-height:1em}
+.rv-raw .df-same,.queue-row-mono .df-same{background:#fff;color:#223}
+
+/* v1.0.0.0: цвета 6 кнопок очереди, карточка чата для людей */
+.admin-dark .queue-row-actions button{color:#fff!important;font-weight:900!important}
+.admin-dark .queue-row-actions button.qb-approve{background:#1e9e50!important;border:1px solid #5fd68a!important}
+.admin-dark .queue-row-actions button.qb-edit{background:#2f6fe0!important;border:1px solid #7aa8ff!important}
+.admin-dark .queue-row-actions button.qb-file{background:#6b7480!important;border:1px solid #a4adb9!important}
+.admin-dark .queue-row-actions button.qb-gh{background:#f08a00!important;border:1px solid #ffc15e!important}
+.admin-dark .queue-row-actions button.qb-done{background:#7a4bd1!important;border:1px solid #b494ff!important}
+.admin-dark .queue-row-actions button.qb-reject{background:#d33a3a!important;border:1px solid #ff8d8d!important}
+.admin-dark .queue-row-actions button.qb-chatdel{background:#d33a3a!important;border:1px solid #ff8d8d!important;font-size:14px}
+.queue-row-actions.q-two{grid-template-columns:1fr 1fr}
+.queue-row-actions button:disabled{opacity:.38!important}
+.q-why{margin-top:6px;font-size:12px;opacity:.85}
+.chat-card{padding:0!important}
+.chat-main{display:block;position:relative;padding:16px 56px 10px 16px;text-decoration:none;color:inherit}
+.chat-main h3{margin:0 0 6px 0!important}
+.chat-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:0 12px 12px}
+.chat-act{min-height:44px;border-radius:12px;border:0;font-weight:800;font-size:14px;color:#fff;cursor:pointer}
+.chat-copy{background:#2f6fe0}
+.chat-share{background:#1e9e50}
+.chat-dead{grid-column:1/-1;background:#fff3d6;color:#7a4b00;border:1px solid #e6b84d}

@@ -1,10 +1,10 @@
 {
-  "schemaVersion": "v5.4.0.2",
-  "appVersion": "v5.4.0.2",
+  "schemaVersion": "v1.0.0.0",
+  "appVersion": "v1.0.0.0",
   "qrShareUrl": "https://zko-spravochnik.github.io/test-cartoteka/",
   "shareAppText": "Сохраните этот контакт! А чтобы скачать весь Справочник округа Бәйтерек себе на телефон и бесплатно искать мастеров, такси и магазины без интернета, переходите по ссылке:",
   "qrMode": "admin-configured",
-  "generatedAt": "2026-10-26",
+  "generatedAt": "2026-10-29",
   "region": "Западно-Казахстанская область",
   "district": "Район Байтерек",
   "regions": [
@@ -1945,7 +1945,7 @@
   "ignored_pairs": [],
   "updateCritical": true,
   "updateNote": "true — критическое обновление (окно без отмены, только «Обновить сейчас»); false — обычное («Обновить» / «Позже»). Меняется перед каждым выпуском.",
-  "dbEpoch": "2026-10-22-v5306-albina-restore",
+  "dbEpoch": "2026-10-31-v1000-cache-reset",
   "nameNote": "name — чистое официальное имя (витрина и Г11 базы). fullName/legacyName — старое название в скобках только для преемственности СУБД. Для Байконыса на витрине показывается «Байконыс (Трекино)» (geo: displayRu).",
   "dbRoot": "bazy_zko",
   "repositoryUrl": "https://github.com/zko-spravochnik/test-cartoteka",
@@ -1953,7 +1953,7 @@
   "envNote": "ТЕСТОВАЯ ПЕСОЧНИЦА. Подхватывается автоматически, если сайт открыт на localhost / IP-адресе / порту или по пути test-cartoteka. Запись идёт строго в репозиторий zko-spravochnik/test-cartoteka.",
   "counts": {
     "baza_zko_baiterek_daryinskoe.txt": [
-      251,
+      250,
       163
     ],
     "baza_zko_baiterek_rubezhinskoe.txt": [
@@ -1969,7 +1969,7 @@
       0
     ],
     "baza_zko_baiterek_baikonys.txt": [
-      3,
+      0,
       0
     ],
     "baza_zko_baiterek_atameken.txt": [
@@ -2612,5 +2612,7 @@
       0,
       0
     ]
-  }
+  },
+  "serverPort": 1119,
+  "workMode": "test"
 }

@@ -13,13 +13,11 @@
    нижестоящая логика (idTile/idSub, рендер плиток, buildCandidateRow)
    не требовала структурных правок — меняется только источник данных.
    Резервные слоты 7-9 на обоих уровнях 9×9 помечены hidden:true. */
-const APP_VERSION='v5.4.0.0',SCHEMA=20;
-/* v5.3.0.4 (исправление): пароль человека — цифровой, запоминается навсегда. Фраза веб-хука в код НЕ вшивается: её вводят руками в поле «Код приёма». */
-const ADMIN_PIN='1411';
+const APP_VERSION='v1.0.0.0',SCHEMA=20;
+/* v1.0.0.0: единый «Код входа в админку» = ADMIN_CODE шлюза. В код сайта он НЕ вшивается: проверку делает локальный сервер (/__auth), на нём хранится только отпечаток. */
 /* Нормализация введённой фразы: без кавычек-ёлочек и обычных кавычек, лишние
    пробелы схлопываются, регистр не учитывается (Пойду Покурю = ПОЙДУ ПОКУРЮ). */
 function normPhrase(v){return String(v||'').replace(/[«»"'“”„‘’`]/g,'').replace(/\s+/g,' ').trim().toLowerCase().replace(/ё/g,'е')}
-function isAdminPin(v){return String(v||'').replace(/[«»"'“”„‘’`\s]/g,'')===ADMIN_PIN}
 /* v5.3.0.4: SHA-256 и хэши из ядра удалены. Вход в пульт — текстовая проверка секретной фразы без учёта регистра. */
 /* ГОСТ Графы №17 (HOME LOCK) — 10 компонентов, 9 слэшей, 2 хвостовых нуля:
    X/C/T1/T2/G/L/W1/W2/0/0 (X=индекс села, C=супер-плитка 1-9, T1=под-плитка
@@ -32,6 +30,11 @@ const MASK19_RE=/^\d+\/[01]\/[12]\/[01]\/[0-9]\/0\/0$/;
 const MARKER_RE=/^(\$|NEW|ORIGINAL|EDIT|DELETE_[1-4]|DELETE_.+)$/;
 const isPublicMarker=m=>m==='$';
 const isQuarantineMarker=m=>MARKER_RE.test(m)&&m!=='$';
+/* v1.0.0.0: строки-ссылки на чаты (Г20 = wa | tg) живут в тех же 20-графовых базах, но в карточки не попадают. */
+const CHAT_MARKER_RE=/^(wa|tg)$/;
+const isChatRow=l=>{const f=String(l||'').split(' | ');return f.length===20&&CHAT_MARKER_RE.test(f[19].trim())};
+function chatOf(f,file){const id=Number(f[0]);if(!/^\d{1,4}$/.test(f[0].trim())||id<1||id>1100)return null;const name=clean(f[1]),link=clean(f[3]);if(!name||name==='.'||!/^https?:\/\//i.test(link))return null;return{id:f[0].trim(),name,desc:clean(f[2])==='.'?'':clean(f[2]),link,kind:clean(f[19]),file,raw:f.map(clean).join(' | ')}}
+function chatKindOfLink(u){const t=String(u||'').toLowerCase();if(/whatsapp\.com|wa\.me/.test(t))return 'wa';if(/(^|\/\/|\.)t\.me\b|telegram\.(me|org)/.test(t))return 'tg';return ''}
 /* Каскадная архитектура 9x9 (с v5.2.0.1) + автоматика ID по сотым долям:
    расположение карточки вычисляется чистой математикой из графы №1 (ID):
    главная супер-плитка=floor(ID/1000), под-плитка Второго Этажа=floor(ID/100)%10. */
@@ -42,6 +45,7 @@ const idSub=id=>Math.floor(Number(id)/100)%10;
    поднимается один раз функцией loadCategories() ниже в эти же runtime-
    имена. До первой успешной загрузки — безопасные пустые заглушки, чтобы
    код, обращающийся к SUPER_TILES/SUB_TILES до старта, не падал. */
+let RES_CRAFTS=[];
 let SUPER_TILES=[],SUB_TILES={},OTHER_TILE={ru:'Прочее',kz:'Басқасы',emoji:'📂'};
 async function loadCategories(){
  try{
@@ -52,6 +56,7 @@ async function loadCategories(){
   const sb=data.subTiles&&typeof data.subTiles==='object'?data.subTiles:{};
   if(data.otherTile&&typeof data.otherTile==='object')OTHER_TILE=Object.assign({},OTHER_TILE,data.otherTile);
   if(st.length){SUPER_TILES=st;SUB_TILES=sb}
+  if(Array.isArray(data.residentCrafts))RES_CRAFTS=data.residentCrafts;
  }catch(e){/* офлайн/битый файл — прежние значения (пустые или ранее успешно загруженные) остаются в силе, белого экрана не будет */}
 }
 /* v5.4.0.0: двойной конфиг. Имя репозитория в коде НЕ прописано: владелец/репозиторий берутся из активного конфига
@@ -106,7 +111,7 @@ const S={
   lang:storageGet('cart_lang','ru')||'ru',
   village:storageGet('cart_village','')||'',
   view:'home',stage:'main',tile:null,sub:null,tag:null,search:'',alphabet:'',
-  rows:[],byKey:new Map(),invalid:[],quarantine:[],files:new Map(),vip:new Map(),
+  rows:[],chats:[],byKey:new Map(),invalid:[],quarantine:[],files:new Map(),vip:new Map(),
   favorites:new Set(),favOrder:[],
   pinned:new Set(),pinnedOrder:[],
   favSettings:{mode:'category',showVip:true},favManualOrder:[],
@@ -223,7 +228,7 @@ const districtName=d=>geoName('district',d),regionName=r=>geoName('region',r);
 function geoDistrictBySlug(slug){return GEO.districts.find(d=>d.slug===slug)}
 async function loadLang(){try{const r=await fetch(`languages.json?v=${Date.now()}`,{cache:'no-store'});if(r.ok)L=await r.json()}catch(e){}}
 async function loadVip(){S.vip.clear();try{const text=await fetchText(CONFIG.PATH_REKLAMA);for(const line of text.split(/\r?\n/)){const p=line.split('|').map(clean);if(p.length>=3)S.vip.set(`${p[0]}::${p[1]}`,p[2])}}catch(e){}}
-function isVip(r){const code=CONFIG.VILLAGES.find(v=>v.file===r.file)?.code,d=S.vip.get(`${code}::${r.id}`);if(!d)return false;const m=d.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);return !!m&&new Date(+m[3],+m[2]-1,+m[1])>new Date()}
+function isVip(r){const code=CONFIG.VILLAGES.find(v=>v.file===r.file)?.code,d=S.vip.get(`${code}::${r.id}`);if(!d)return false;if(/^(навсегда|бессрочно|forever)$/i.test(String(d).trim()))return true;const m=d.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);return !!m&&new Date(+m[3],+m[2]-1,+m[1])>new Date()}
 function buildRows(){S.byKey=new Map();S.rows.sort((a,b)=>Number(a.id)-Number(b.id)||a.file.localeCompare(b.file));for(const r of S.rows)S.byKey.set(favKey(r),r)}
 /* ===== v5.4.0.0: ЛЕНИВАЯ ЗАГРУЗКА БАЗ =====
    При запуске скачиваются только config.json / geo / языки (они же «индекс» районов и сёл).
@@ -238,19 +243,22 @@ async function fetchVillageText(file){
  }
 }
 function dropVillageRows(file){
+S.chats=(S.chats||[]).filter(c=>c.file!==file);
  S.rows=S.rows.filter(r=>r.file!==file);S.invalid=S.invalid.filter(x=>x.file!==file);S.quarantine=S.quarantine.filter(x=>x.file!==file);S.files.delete(file);
 }
 function ingestDbText(item){
  let parsedRows=0;
- if(item.error){S.files.set(item.file,{text:'',size:0,rows:0,bad:1,rawLines:0,source:'unavailable'});S.invalid.push({file:item.file,line:0,errors:[T('fileNotReceived',{error:item.error})],raw:''});return 0}
+ if(item.error){ensureDefaultChats(item.file);S.files.set(item.file,{text:'',size:0,rows:0,bad:1,rawLines:0,source:'unavailable'});S.invalid.push({file:item.file,line:0,errors:[T('fileNotReceived',{error:item.error})],raw:''});return 0}
  const size=new TextEncoder().encode(item.text).length,info={text:item.text,size,rows:0,bad:0,rawLines:0,source:item.source,emergencySkipped:0};S.files.set(item.file,info);
  const lines=String(item.text??'').replace(/^\uFEFF/,'').split(/\r?\n/);
  for(let i=0;i<lines.length;i++){
   const raw=clean(lines[i]);if(!raw||raw.startsWith('#'))continue;info.rawLines++;
   const fields=raw.split(' | ').map(clean);
+  if(fields.length===20&&CHAT_MARKER_RE.test(fields[19])){const c=chatOf(fields,item.file);if(c)S.chats.push(c);else{S.invalid.push({line:i+1,file:item.file,errors:[T('chatBadRow')],raw});info.bad++}continue}
   if(fields.length===20&&CONFIG.EMERGENCY.includes(clean(fields[5]))){info.emergencySkipped++;continue}
   const parsed=parseRow(raw,i+1,item.file);if(parsed.row){S.rows.push(parsed.row);info.rows++;parsedRows++}else if(parsed.quarantine){S.quarantine.push(parsed.quarantine);info.bad++}else{S.invalid.push(parsed.error);info.bad++}
  }
+ ensureDefaultChats(item.file);
  return parsedRows;
 }
 async function loadVillageFile(file,force){
@@ -285,7 +293,7 @@ async function ensureAllLoaded(){
 }
 async function loadDatabases(){
  const cur=villageObj()?.file,want=new Set([...S.loaded]);if(cur)want.add(cur);
- S.rows=[];S.invalid=[];S.quarantine=[];S.files=new Map();S.loaded=new Set();
+ S.rows=[];S.chats=[];S.invalid=[];S.quarantine=[];S.files=new Map();S.loaded=new Set();
  const items=await Promise.all([...want].map(fetchVillageText));
  let parsedRows=0;
  for(const it of items){parsedRows+=ingestDbText(it);if(!it.error)S.loaded.add(it.file)}
@@ -293,8 +301,25 @@ async function loadDatabases(){
 }
 
 /* ===== Выборки по плиткам / ДВУХСЛОЙНЫЙ ГИБРИДНЫЙ ПОИСК (сохранено v5.0.2.2) ===== */
-function mainTileRows(mainId){const id=Number(mainId);if(!Number.isInteger(id)||id<1||id>9)return[];return currentVillageRows().filter(r=>!r.resParts&&idTile(r.id)===id)}
-function subTileRows(mainId,subId){const s=Number(subId);if(!Number.isInteger(s)||s<1||s>9)return[];return mainTileRows(mainId).filter(r=>idSub(r.id)===s)}
+/* v1.0.0.0: АВТОПИЛОТ КОММЕРЦИИ. Описание жителя (примечание, теги, место работы) проверяется по словарю residentCrafts
+   из categories.json (десятки корней по всем разделам). Нашёлся маркер коммерции — карточка жителя дублируется на экране в
+   нужный раздел бизнеса (Мастера, Магазины, Транспорт, Медицина, Прочее). Оригинал остаётся в «Жителях», в базе строка одна. */
+function craftRe(c){
+ if(c._re)return c._re;
+ const esc2=w=>w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+ c._re=(c.words||[]).map(w=>{w=String(w).toLowerCase().replace(/ё/g,'е');const whole=w[0]==='=';if(whole)w=w.slice(1);return new RegExp('(^|[^а-яa-z0-9])'+esc2(w)+(whole?'($|[^а-яa-z0-9])':''))});
+ return c._re;
+}
+function craftOf(r){
+ if(!r||!r.resParts||!RES_CRAFTS.length)return null;
+ if(r._craft!==undefined)return r._craft;
+ const txt=String([r.residentNote,r.tags,r.social].filter(x=>x&&x!=='.').join(' ; ')).toLowerCase().replace(/ё/g,'е');
+ let out=null;
+ for(const c of RES_CRAFTS){if(craftRe(c).some(re=>re.test(txt))){out={tile:Number(c.tile),sub:Number(c.sub),t2:Number(c.t2)};break}}
+ r._craft=out;return out;
+}
+function mainTileRows(mainId){const id=Number(mainId);if(!Number.isInteger(id)||id<1||id>9)return[];return currentVillageRows().filter(r=>r.resParts?(craftOf(r)?.tile===id):idTile(r.id)===id)}
+function subTileRows(mainId,subId){const s=Number(subId);if(!Number.isInteger(s)||s<1||s>9)return[];return mainTileRows(mainId).filter(r=>r.resParts?craftOf(r).sub===s:idSub(r.id)===s)}
 function tileRows(mainId){return mainTileRows(mainId)}
 /* v5.2.0.1: токенизация ФИО (Фамилия/Имя/Отчество — независимые токены, а
    не единая строка) + расширение каждого токена его народными синонимами
@@ -353,7 +378,8 @@ function quickKeys(kind){if(kind==='recent'){try{return JSON.parse(storageGet('c
 /* ===== Карточка / блок связи ===== */
 function card(r){
  const fav=S.favorites.has(favKey(r)),pinned=S.pinned.has(favKey(r)),vip=isVip(r);
- let h=`<article class="card ${vip?'card-vip':''}" data-file="${esc(r.file)}" data-id="${esc(r.id)}"><div class="card-actions"><button class="card-star ${fav?'on':''}" data-fav="1" aria-label="${esc(fav?T('favOnAria'):T('favOffAria'))}">${fav?'★':'☆'}</button><button class="card-pin ${pinned?'on':''}" data-pin="1" aria-label="${esc(pinned?T('pinOnAria'):T('pinOffAria'))}">📌</button></div>${vip?'<div class="vip-crown">👑</div>':''}<h3>${esc(r.title)}</h3>`;
+ const hueCls=(!vip&&r.homeParts&&!r.resParts)?` card-hue ${hueOf(r.homeParts[1],r.homeParts[2])}`:'';
+ let h=`<article class="card ${vip?'card-vip':''}${hueCls}" data-file="${esc(r.file)}" data-id="${esc(r.id)}"><div class="card-actions"><button class="card-star ${fav?'on':''}" data-fav="1" aria-label="${esc(fav?T('favOnAria'):T('favOffAria'))}">${fav?'★':'☆'}</button><button class="card-pin ${pinned?'on':''}" data-pin="1" aria-label="${esc(pinned?T('pinOnAria'):T('pinOffAria'))}">📌</button></div><h3>${vip?'<span class="vip-badge" aria-label="VIP">👑 VIP</span>':''}${esc(r.title)}</h3>`;
  const sub=r.folder==='ЖИТЕЛИ'?r.residentNote:r.owner;
  if(sub&&sub!=='.'&&norm(sub)!==norm(r.title))h+=`<div class="card-subtitle">👤 ${esc(sub)}</div>`;
  if(r.tags&&r.tags!=='.')h+=`<div class="card-desc">${esc(r.tags)}</div>`;
@@ -443,7 +469,7 @@ function bizLinksFor(r){
 function bizLinksHtml(r){
  if(!r.resParts)return'';
  const list=bizLinksFor(r);if(!list.length)return'';
- return `<div class="biz-links">${list.map(b=>`<button type="button" class="biz-link" data-bizlink="${esc(favKey(b))}">${esc(T(idTile(b.id)===5?'linkWork':'linkBiz',{title:b.title}))}</button>`).join('')}</div>`;
+ return `<div class="biz-links">${list.map(b=>`<button type="button" class="biz-link hue-bound ${hueOf(b.homeParts?b.homeParts[1]:idTile(b.id),b.homeParts?b.homeParts[2]:0)}" data-bizlink="${esc(favKey(b))}">${esc(T(idTile(b.id)===5?'linkWork':'linkBiz',{title:b.title}))}</button>`).join('')}</div>`;
 }
 function openBizCard(key){
  const t=S.byKey.get(key);if(!t)return;
@@ -479,11 +505,13 @@ function hueOf(mainId,subId){
  const sb=subId?(SUB_TILES[mainId]||[]).find(x=>x.sub===Number(subId)):null;
  return 'hue-'+((sb&&sb.hue)||(st&&st.hue)||'sand');
 }
+/* v1.0.0.0: «1 контакт / 2 контакта / 5 контактов» */
+function contactsLabel(n){n=Number(n)||0;if(S.lang==='kz')return `${n} ${T('contacts')}`;const m=n%100,d=n%10;const w=(m>=11&&m<=14)?'контактов':d===1?'контакт':(d>=2&&d<=4)?'контакта':'контактов';return `${n} ${w}`}
 const plaqueHtml=(text,hue)=>`<div class="title-plaque ${hue}">${esc(text)}</div>`;
 function tilesOf(sb){return sb&&Array.isArray(sb.tiles)&&sb.tiles.length?sb.tiles.filter(t=>!t.hidden):null}
 function tileLabel(t){return S.lang==='kz'?(t.kz||t.ru):t.ru}
 function otherTileLabel(sb){const o=(sb&&sb.otherTile)||OTHER_TILE;return S.lang==='kz'?(o.kz||o.ru||OTHER_TILE.kz):(o.ru||OTHER_TILE.ru)}
-function rowT2(r){const v=r&&r.homeParts?Number(r.homeParts[3]):0;return Number.isInteger(v)&&v>=0&&v<=9?v:0}
+function rowT2(r){if(r&&r.resParts){const c=craftOf(r);return c?c.t2:0}const v=r&&r.homeParts?Number(r.homeParts[3]):0;return Number.isInteger(v)&&v>=0&&v<=9?v:0}
 function effT2(r,tiles){const v=rowT2(r);return tiles.some(t=>t.t2===v)?v:0}
 function currentSub(){return (SUB_TILES[S.tile]||[]).find(x=>x.sub===S.sub)}
 function renderTileGrid(host,sb,rows){
@@ -491,7 +519,7 @@ function renderTileGrid(host,sb,rows){
  rows.forEach(r=>{const k=effT2(r,tiles);cnt.set(k,(cnt.get(k)||0)+1)});
  const list=tiles.map(t=>({t2:t.t2,label:tileLabel(t),emoji:t.emoji||'📁',count:cnt.get(t.t2)||0}));
  if(!tiles.some(t=>t.t2===0)&&(cnt.get(0)||0)>0)list.push({t2:0,label:otherTileLabel(sb),emoji:(OTHER_TILE.emoji||'📂'),count:cnt.get(0)});
- host.innerHTML=`<div class="page v401-tiles tile3-grid">${list.map(x=>`<button type="button" class="tile pastel-tile ${hueOf(S.tile,S.sub)}" data-tile3="${x.t2}"><span class="tile-emoji">${esc(x.emoji)}</span><span class="tile-title">${esc(x.label)}</span><small>${x.count} ${esc(T('contacts'))}</small></button>`).join('')}</div><button type="button" class="back-capsule w100 tile3-all" id="tileAllBtn">${esc(T('tileShowAll'))} (${rows.length})</button>`;
+ host.innerHTML=`<div class="page v401-tiles tile3-grid">${list.map(x=>`<button type="button" class="tile pastel-tile ${hueOf(S.tile,S.sub)}" data-tile3="${x.t2}"><span class="tile-emoji">${esc(x.emoji)}</span><span class="tile-title">${esc(x.label)}</span><small class="tile3-foot"><span class="foot-id" aria-hidden="true">🪪</span><span class="foot-count">${esc(contactsLabel(x.count))}</span><span class="foot-go" aria-hidden="true">↗</span></small></button>`).join('')}</div><button type="button" class="back-capsule w100 tile3-all" id="tileAllBtn">${esc(T('tileShowAll'))} (${rows.length})</button>`;
  host.querySelectorAll('[data-tile3]').forEach(b=>b.addEventListener('click',()=>{S.tag=Number(b.dataset.tile3);renderFolder();renderCards();scrollTop()}));
  $('#tileAllBtn')?.addEventListener('click',()=>{S.tag=-1;renderFolder();renderCards();scrollTop()});
 }
@@ -509,7 +537,7 @@ function renderTiles(){
       const count=subTileRows(S.tile,sb.sub).length;
       const b=document.createElement('button');
       b.className='tile pastel-tile '+hueOf(S.tile,sb.sub);
-      b.innerHTML=`<span class="tile-emoji">📁</span><span class="tile-title">${esc(subLabel(sb))}</span><small>${count} ${esc(T('contacts'))}</small>`;
+      b.innerHTML=`<span class="tile-emoji">${esc(sb.emoji||'🔹')}</span><span class="tile-title">${esc(subLabel(sb))}</span><small class="tile3-foot"><span class="foot-id" aria-hidden="true">${tilesOf(sb)?'📂':'🪪'}</span><span class="foot-count">${esc(contactsLabel(count))}</span><span class="foot-go" aria-hidden="true">↗</span></small>`;
       b.onclick=()=>openSubTile(S.tile,sb.sub);
       grid.appendChild(b);
     }
@@ -528,16 +556,18 @@ function renderTiles(){
     const count=mainTileRows(st.id).length;
     const b=document.createElement('button');
     b.className='tile pastel-tile '+hueOf(st.id);
-    b.innerHTML=`<span class="tile-emoji">${st.emoji}</span><span class="tile-title">${esc(superLabel(st))}</span><small>${count} ${esc(T('contacts'))}</small>`;
+    b.innerHTML=`<span class="tile-emoji">${st.emoji}</span><span class="tile-title">${esc(superLabel(st))}</span><small class="tile3-foot"><span class="foot-id" aria-hidden="true">📂</span><span class="foot-count">${esc(contactsLabel(count))}</span><span class="foot-go" aria-hidden="true">↗</span></small>`;
     b.onclick=()=>openSuperTile(st.id);
     grid.appendChild(b);
   }
   host.appendChild(grid);
-  if(q)q.innerHTML=`<button id="sosBtn" type="button" class="sos-compact">🆘 SOS</button><div class="home-smart-grid"><button class="smart-card" id="recentBtn">🕘<b>${esc(T('quickRecent'))}</b><small>${esc(T('quickRecentDesc'))}</small></button><button class="smart-card" id="popularBtn">⭐<b>${esc(T('quickPopular'))}</b><small>${esc(T('quickPopularDesc'))}</small></button></div>`;
+  if(q)q.innerHTML=`<button id="sosBtn" type="button" class="sos-compact">🆘 SOS</button><div class="chat-blocks"><button id="waBlock" type="button" class="chat-block wa">🟢 ${esc(T('chatWaTitle'))}</button><button id="tgBlock" type="button" class="chat-block tg">🔵 ${esc(T('chatTgTitle'))}</button></div><div class="home-smart-grid"><button class="smart-card" id="recentBtn">🕘<b>${esc(T('quickRecent'))}</b><small>${esc(T('quickRecentDesc'))}</small></button><button class="smart-card" id="popularBtn">⭐<b>${esc(T('quickPopular'))}</b><small>${esc(T('quickPopularDesc'))}</small></button></div>`;
   $('#sosBtn')?.addEventListener('click',()=>{
     showModal(`<div class="modal-content"><h2>${esc(T('sosTitle'))}</h2><div class="sos-grid">${CONFIG.EMERGENCY.map(n=>`<a href="tel:${n}">${n}</a>`).join('')}</div><div class="modal-actions"><button class="secondary" id="sosClose">${esc(T('sosClose'))}</button></div></div>`);
     const closeBtn=$('#sosClose');if(closeBtn)closeBtn.addEventListener('click',closeModal);
   });
+  $('#waBlock')?.addEventListener('click',()=>openChats('wa'));
+  $('#tgBlock')?.addEventListener('click',()=>openChats('tg'));
   $('#recentBtn')?.addEventListener('click',()=>showQuickList('recent','🕘 '+T('quickRecent')));
   $('#popularBtn')?.addEventListener('click',()=>showQuickList('popular','⭐ '+T('quickPopular')));
 }
@@ -588,7 +618,10 @@ function renderSearchPockets(host,commercial,residents){
 function renderEmptyStub(host){
  host.innerHTML=`<div class="empty-stub ${hueOf(S.tile,S.sub)}"><div class="empty-stub-emoji">🌱</div><p>${esc(T('emptyCategoryStub'))}</p></div>`;
 }
-function vipFirst(rows){const v=[],o=[];for(const r of rows)(isVip(r)?v:o).push(r);return v.length?v.concat(o):rows}
+/* v5.4.0.1: КАРУСЕЛЬ — VIP всегда наверху, а внутри VIP-блока порядок перемешивается заново при каждой загрузке страницы */
+const VIP_SEED=Math.floor(Math.random()*2147483647)+1;
+function vipRank(r){let h=VIP_SEED;const k=favKey(r);for(let i=0;i<k.length;i++)h=(Math.imul(h^k.charCodeAt(i),16777619)>>>0);return h}
+function vipFirst(rows){const v=[],o=[];for(const r of rows)(isVip(r)?v:o).push(r);if(!v.length)return rows;v.sort((a,b)=>vipRank(a)-vipRank(b));return v.concat(o)}
 function renderCards(){
   const host=$('#cards');if(!host)return;
   let rows=[];
@@ -711,7 +744,7 @@ function render(){
   const home=$('#homeView'),list=$('#listView'),folder=$('#categoryFolder');
   if(home)home.classList.toggle('hidden',S.view!=='home');
   if(list)list.classList.toggle('hidden',S.view==='home');
-  if(folder)folder.classList.toggle('hidden',S.view!=='category');
+  if(folder)folder.classList.toggle('hidden',S.view!=='category'&&S.view!=='chats');
   $('#searchRow')?.classList.toggle('hidden',!(S.view==='search'||S.view==='residents'));
   const inp=$('#searchInput');
   if(inp)inp.placeholder=S.view==='residents'?T('searchPlaceholderResidents'):T('searchPlaceholderAll');
@@ -719,17 +752,26 @@ function render(){
   renderAlphabet();
   if(S.view==='home'){renderTiles();renderCards()}
   else if(S.view==='category'){renderFolder();renderCards()}
+  else if(S.view==='chats'){renderChats()}
   else if(S.view==='residents'){$('#listToolbar').innerHTML=`<div class="list-title">👥 ${esc(T('navResidents'))}</div>`;renderCards()}
   else if(S.view==='search'){$('#listToolbar').innerHTML=`<div class="list-title">🔎 ${esc(T('navSearch'))}</div>`;renderCards()}
   else if(S.view==='favorites'){$('#listToolbar').innerHTML=`<div class="list-title">⭐ ${esc(T('navFavorites'))}</div><button id="favSettingsBtn" class="fav-settings-btn" type="button" aria-label="${esc(T('favSettingsAria'))}">⚙️</button>`;const gb=$('#favSettingsBtn');if(gb)gb.onclick=favSettingsModal;renderCards()}
   else{$('#listToolbar').innerHTML=`<div class="list-title">… ${esc(T('navMore'))}</div>`;renderMore()}
+}
+/* v1.0.0.0: ШТОРКА ХЕДЕРА. Язычок справа от синей плашки сворачивает всю шапку «Картотека» вверх; состояние запоминается
+   навсегда (localStorage) и не сбрасывается при переходах по категориям и вкладкам, т.к. класс висит на body. */
+let HDR_COLLAPSED=(()=>{try{return storageGet('cart_hdr_collapsed','')==='1'}catch(e){return false}})();
+function applyHeaderCollapse(){
+ document.body.classList.toggle('hdr-collapsed',HDR_COLLAPSED);
+ const t=$('#headerToggle');if(t){t.textContent=HDR_COLLAPSED?'🔽':'🔼';t.setAttribute('aria-expanded',String(!HDR_COLLAPSED));t.setAttribute('aria-label',T(HDR_COLLAPSED?'hdrExpand':'hdrCollapse'))}
 }
 function syncHeader(){
  const vc=$('#villagePicker');if(vc)vc.textContent=T('villagePickerBtn',{village:villageLabel(S.village)});
  const lt=$('#langToggle');if(lt)lt.textContent=S.lang==='kz'?'KZ':'RU';
  const pl=$('#postalLine');if(pl)pl.textContent=T('postalPrefix',{code:postalFor(S.village)});
  const z=$('#headerAddZone');
- if(z){z.innerHTML=S.view==='residents'?`<button id="headerAddResident" class="header-add pastel-small">${esc(T('addResidentBtn'))}</button>`:`<button id="headerAddBusiness" class="header-add primary">${esc(T('addBusinessBtn'))}</button>`;const b=$('#headerAddResident');if(b)b.onclick=()=>openAddForm('resident');const bb=$('#headerAddBusiness');if(bb)bb.onclick=()=>openAddForm('business')}
+ if(z){z.innerHTML=`<div class="header-add-row"><button id="headerAddBusiness" class="header-add primary">${esc(T('addUnifiedBtn'))}</button><button id="headerToggle" class="header-toggle" type="button"></button></div>`;const bb=$('#headerAddBusiness');if(bb)bb.onclick=openAdd;const tg=$('#headerToggle');if(tg)tg.onclick=()=>{HDR_COLLAPSED=!HDR_COLLAPSED;try{storageSet('cart_hdr_collapsed',HDR_COLLAPSED?'1':'0')}catch(e){}applyHeaderCollapse()}}
+ applyHeaderCollapse();
 }
 function districtOfVillage(name){const g=GEO.villages.find(v=>v.nameRu===name);return (g&&g.districtSlug)||'beyterek'}
 function postalFor(villageName){const g=geoVillageByName(districtOfVillage(villageName),villageName);const code=g&&g.postalCode?g.postalCode:'';return code||T('postalUnknown')}
@@ -806,6 +848,14 @@ function setupSwipes(){
   if(v!=='search'){S.search='';S.alphabet='';const inp=$('#searchInput');if(inp)inp.value=''}
   render();scrollTop();
  },{passive:true});
+}
+/* v5.4.0.1: плашка-подтверждение сверху экрана (видна поверх окон пульта) */
+let PULT_KEEP={telegramBotToken:'',telegramChatId:''};
+function banner(msg,bad){
+ let b=document.getElementById('topBanner');
+ if(!b){b=document.createElement('div');b.id='topBanner';b.setAttribute('role','status');b.setAttribute('aria-live','polite');document.body.appendChild(b)}
+ b.textContent=msg;b.className='top-banner show'+(bad?' bad':'');
+ clearTimeout(banner._t);banner._t=setTimeout(()=>b.classList.remove('show'),bad?5200:3600);
 }
 function toast(s){const e=$('#toast');e.textContent=s;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),1800)}
 function scrollTop(){window.scrollTo({top:0,behavior:'smooth'})}
@@ -1010,9 +1060,92 @@ function buildCandidateRow(fd,mode){
     служебного технического префикса «зона». */
  return [id,folder,title,resident?'.':person,resident?person:'.',city,m1,m2,address,tags,`с. ${village}`,schedule,social,'R','R','R',home,res,search,'NEW'].join(' | ');
 }
+/* ===== v1.0.0.0: блоки «Группы WhatsApp» / «Каналы Telegram» и анкета «Добавить ссылку» ===== */
+/* v1.0.0.0: официальная группа WhatsApp с. Дарьинское зашита в код и выводится с первого запуска (строка в формате базы, Г4 склеивается без пробелов). */
+const DEFAULT_CHATS=[{file:'baza_zko_baiterek_daryinskoe.txt',row:['0001','Дарьинск. Адресная и Телефонная база','Поиск номеров телефона ☎️ 📝 и адресов 🏪 магазинов, ЦОН, аптека, почта, парикмахерская и так далее..🏡⛪🏢🏥🏪⛲🏦 Нажмите, чтобы вступить в группу WhatsApp.','h t t p s : / / c h a t . w h a t s a p p . c o m / C w 9 L e h x o M u Z L S 0 v w V S 3 y v 0 ? s = c l & p = a & i a m = 2'.replace(/\s+/g,''),'.','.','.','.','.','.','.','.','.','R','R','R','0','0','0','wa']}];
+function ensureDefaultChats(file){
+ for(const d of DEFAULT_CHATS){
+  if(d.file!==file)continue;
+  const c=chatOf(d.row,file);if(!c)continue;
+  if(!(S.chats||[]).some(x=>x.file===file&&x.link.toLowerCase()===c.link.toLowerCase()))S.chats.push(c);
+ }
+}
+/* v1.0.0.0: блоки под SOS — «парадные двери»: отдельный экран раздела (S.view='chats'), без модальных окон. */
+async function openChats(kind){
+ S.view='chats';S.chatKind=kind==='tg'?'tg':'wa';S.tile=null;S.sub=null;S.tag=null;S.search='';
+ render();scrollTop();
+ const file=villageFile();
+ if(file&&!S.loaded.has(file)){try{await ensureFilesLoaded([file])}catch(e){}if(S.view==='chats')render()}
+}
+function renderChats(){
+ const kind=S.chatKind==='tg'?'tg':'wa',file=villageFile();
+ const host=$('#categoryFolder');
+ if(host){host.innerHTML=`<div class="folder-head"><button class="back-capsule back-wide" id="folderBack">⬅️ ${esc(T('back'))}</button></div>`;
+  $('#folderBack')?.addEventListener('click',()=>{S.view='home';S.stage='main';S.tile=null;render();scrollTop()})}
+ const tb=$('#listToolbar');if(tb)tb.innerHTML=plaqueHtml((kind==='wa'?'🟢 ':'🔵 ')+T(kind==='wa'?'chatWaTitle':'chatTgTitle'),kind==='wa'?'hue-green':'hue-sky');
+ const list=(S.chats||[]).filter(c=>c.file===file&&c.kind===kind).sort((a,b)=>Number(a.id)-Number(b.id));
+ const cards=$('#cards');if(!cards)return;
+ cards.innerHTML=list.length?list.map((c,i)=>`<div class="card chat-card card-hue ${kind==='wa'?'hue-green':'hue-sky'}"><a class="chat-main" href="${esc(c.link)}" target="_blank" rel="noopener noreferrer"><h3>${esc(c.name)}</h3>${c.desc?`<p class="card-desc chat-desc">${esc(c.desc)}</p>`:''}<span class="chat-go" aria-hidden="true">↗</span></a><div class="chat-actions"><button type="button" class="chat-act chat-copy" data-ci="${i}">${esc(T('chatCopyBtn'))}</button><button type="button" class="chat-act chat-share" data-ci="${i}">${esc(T('chatShareBtn'))}</button><button type="button" class="chat-act chat-dead" data-ci="${i}">${esc(T('chatDeadBtn'))}</button></div></div>`).join(''):`<div class="card"><p class="card-desc">${esc(T('chatEmpty'))}</p></div>`;
+ const pick=b=>list[Number(b.dataset.ci)];
+ cards.querySelectorAll('.chat-copy').forEach(b=>b.onclick=async()=>{const c=pick(b);if(c){await copyText(c.link);toast(T('chatCopiedToast'))}});
+ cards.querySelectorAll('.chat-share').forEach(b=>b.onclick=async()=>{
+  const c=pick(b);if(!c)return;
+  if(navigator.share){try{await navigator.share({title:c.name,text:c.desc||c.name,url:c.link})}catch(e){}}
+  else{await copyText(c.link);toast(T('chatCopiedToast'))}
+ });
+ cards.querySelectorAll('.chat-dead').forEach(b=>b.onclick=()=>{const c=pick(b);if(c)chatDeadAsk(c)});
+}
+async function copyText(t){
+ try{await navigator.clipboard.writeText(t);return true}catch(e){}
+ try{const ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();const ok=document.execCommand('copy');ta.remove();return ok}catch(e){return false}
+}
+/* Жалоба «Ссылка сброшена»: сначала окно проверки, сигнал уходит ТОЛЬКО после подтверждения. Одна жалоба с устройства на чат. */
+function chatDeadAsk(c){
+ showModal(`<div class="modal-content"><h2>⚠️ ${esc(T('chatDeadAskTitle'))}</h2><p class="card-desc">«${esc(c.name)}»</p><div class="modal-actions"><button class="primary big-action" id="deadYes" type="button">${esc(T('chatDeadYes'))}</button><button class="secondary big-action" id="deadNo" type="button">${esc(T('chatDeadNo'))}</button></div></div>`);
+ $('#deadNo').onclick=closeModal;
+ $('#deadYes').onclick=async()=>{
+  const dev=(await deviceId()).slice(0,12),key=`${dev}-${c.file}-${c.id}`;
+  let sent=[];try{sent=JSON.parse(storageGet('cart_chatdead','[]'))||[]}catch(e){}
+  if(sent.includes(key)){closeModal();toast(T('chatDeadAlready'));return}
+  sent.push(key);try{storageSet('cart_chatdead',JSON.stringify(sent.slice(-200)))}catch(e){}
+  enqueueRequest({uid:'dead-'+key,status:'PENDING',kind:'DELETE',createdAt:new Date().toISOString(),village:villageObj()?.name||'',file:c.file,id:c.id,reason:'Ссылка сброшена',candidateRow:c.raw,schema:SCHEMA});
+  closeModal();toast(T('chatDeadSent'));sendPendingToIntake().catch(()=>{});
+ };
+}
+function nextChatId(file){
+ /* первый свободный индекс 0001–1100 в этом селе: файл (в Дарьинском 0001 занят вечной группой) + заявки в очереди телефона */
+ const used=new Set();
+ for(const c of S.chats||[])if(c.file===file)used.add(Number(c.id)||0);
+ for(const q of queueLocal()){if(q.file!==file||q.kind!=='NEW')continue;const f=String(q.candidateRow||'').split(' | ');if(f.length===20&&CHAT_MARKER_RE.test(f[19]))used.add(Number(f[0])||0)}
+ for(let n=1;n<=1100;n++)if(!used.has(n))return n;
+ return 1101;
+}
+function openChatForm(){
+ const v=villageObj();if(!v)return;
+ showModal(`<div class="modal-content"><div class="form-head"><button class="back-capsule big-action" id="chatBack">⬅️ ${esc(T('back'))}</button><h2>${esc(T('chatFormTitle'))}</h2></div><div class="hint">📍 ${esc(villageLabel(v.name))}</div><form id="chatForm" class="form-grid"><label>${esc(T('chatFName'))}<input name="name" maxlength="60" required autocomplete="off"></label><label>${esc(T('chatFDesc'))}<input name="desc" maxlength="140" required autocomplete="off"></label><label>${esc(T('chatFLink'))}<input name="link" type="text" inputmode="url" maxlength="300" required autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://chat.whatsapp.com/… или https://t.me/…"></label><div class="modal-actions"><button class="primary big-action" type="submit">${esc(T('chatFSend'))}</button><button class="secondary" type="button" id="chatCancel">${esc(T('addCancelBtn'))}</button></div></form></div>`);
+ $('#chatBack').onclick=openAdd;$('#chatCancel').onclick=closeModal;
+ $('#chatForm').onsubmit=async e=>{
+  e.preventDefault();
+  const fd=new FormData(e.target);
+  const cl=x=>clean(String(x||'').replace(/\s*\|\s*/g,' ').replace(/[\r\n]+/g,' '));
+  const name=cl(fd.get('name')),desc=cl(fd.get('desc'));let link=clean(String(fd.get('link')||'')).replace(/\s+/g,'');
+  if(/^(chat\.whatsapp\.com|wa\.me|t\.me|telegram\.me)\//i.test(link))link='https://'+link;
+  if(!name||!desc||!/^https?:\/\/[^\s|]+$/i.test(link)){toast(T('chatBadLinkToast'));return}
+  const kind=chatKindOfLink(link);
+  if(!kind){toast(T('chatBadLinkToast'));return}
+  const file=v.file;try{await ensureFilesLoaded([file])}catch(err){}
+  if((S.chats||[]).some(c=>c.file===file&&c.link.toLowerCase()===link.toLowerCase())){toast(T('chatDupToast'));return}
+  const n=nextChatId(file);if(n>1100){toast(T('chatFullToast'));return}
+  const id=String(n).padStart(4,'0');
+  const row=[id,name,desc,link,'.','.','.','.','.','.','.','.','.','R','R','R','0','0','0',kind].join(' | ');
+  enqueueRequest({status:'PENDING',kind:'NEW',createdAt:new Date().toISOString(),village:v.name,file,mode:'chat',candidateRow:row,schema:SCHEMA});
+  closeModal();toast(T('requestSaved'));sendPendingToIntake().catch(()=>{});
+ };
+}
 function openAdd(){
- showModal(`<div class="modal-content"><h2>${esc(T('addChooseTitle'))}</h2><div class="add-choice"><button class="primary choice-btn" id="addBusiness">${esc(T('addBusinessBtn'))}</button><button class="secondary choice-btn" id="addResident">${esc(T('addResidentBtn'))}</button></div><button class="secondary w100 choice-btn big-action add-cancel-big" id="addCancel">${esc(T('addCancelBtn'))}</button></div>`);
- $('#addCancel').onclick=closeModal;$('#addBusiness').onclick=()=>openAddForm('business',undefined,{skipGuide:true});$('#addResident').onclick=()=>openAddForm('resident',undefined,{skipGuide:true});
+ /* v5.4.0.1: единое четырёхкнопочное окно — открывается с любой из 5 вкладок */
+ showModal(`<div class="modal-content"><h2>${esc(T('addChooseTitle'))}</h2><div class="add-choice"><button class="primary choice-btn" id="addBusiness">${esc(T('addBusinessBtn'))}</button><button class="secondary choice-btn" id="addResident">${esc(T('addResidentBtn'))}</button><button type="button" class="vip-apply choice-btn" id="addVip"><span class="vip-badge mini" aria-hidden="true">👑 VIP</span><span class="vip-apply-text">${esc(T('vipApplyBtn'))}</span></button></div><button type="button" class="choice-btn chat-add-btn" id="addChat">${esc(T('addChatBtn'))}</button><button class="secondary w100 choice-btn big-action add-cancel-big" id="addCancel">${esc(T('addCancelBtn'))}</button></div>`);
+ $('#addCancel').onclick=closeModal;$('#addBusiness').onclick=()=>openAddForm('business');$('#addResident').onclick=()=>openAddForm('resident');$('#addVip').onclick=()=>openVipForm();$('#addChat').onclick=openChatForm;
 }
 function renderAddGeoWheels(regionSlug,districtSlug,villageName){
  const host=$('#geoWheels');if(!host)return;
@@ -1246,13 +1379,13 @@ async function sendPendingToIntake(){
  try{
   for(const item of q){
    const lines=String(item.candidateRow||'').split('\n').filter(Boolean);
-   const last=lines[lines.length-1]||'';
+   const last=(typeof QEDIT!=='undefined'&&QEDIT.get(item.uid))||lines[lines.length-1]||'';
    if(!item.file||last.split(' | ').length!==20){markQueueError(item.uid,'bad_row');continue}
    const kind=item.kind==='EDIT'||item.kind==='DELETE'?item.kind:'NEW';
    const payload={action:'submit',uid:item.uid,file:item.file,kind,
-    row:kind==='DELETE'?last:markerSwap(last,'$'),
+    row:kind==='DELETE'||isChatRow(last)?last:markerSwap(last,'$'),
     original:kind==='EDIT'&&lines.length>1?markerSwap(lines[0],'$'):'',
-    reason:clean(item.reason||item.reasonCode||'')};
+    reason:clean(item.reason||item.reasonCode||''),village:clean(item.village||'')};
    let res=null;
    try{res=await intakePost(payload)}catch(e){res=null}
    if(res&&res.ok)removeQueueLocal(item.uid);
@@ -1262,13 +1395,77 @@ async function sendPendingToIntake(){
  }finally{intakeSending=false}
 }
 /* v5.4.0.0: любое добавление (бизнес, житель, село, район, область, общая кнопка) начинается с коротких правил заполнения. */
-function showAddGuide(next){
- showModal(`<div class="modal-content add-guide"><h2>📝 ${esc(T('addGuideTitle'))}</h2><ol class="add-guide-list">${[1,2,3,4,5].map(i=>`<li>${esc(T('addGuide'+i))}</li>`).join('')}</ol><div class="modal-actions"><button class="primary big-action w100" id="addGuideOk">${esc(T('addGuideOk'))}</button></div><div class="modal-actions"><button class="secondary big-action w100" id="addGuideCancel">${esc(T('cancel'))}</button></div></div>`);
+function showAddGuide(next,mode){
+  showModal(`<div class="modal-content add-guide"><h2>📝 ${esc(T('addGuideTitle'))}</h2><ol class="add-guide-list">${[1,2,3,4,5].map(i=>`<li>${esc(T('addGuide'+i))}</li>`).join('')}</ol><div class="modal-actions"><button class="primary big-action w100" id="addGuideOk">${esc(T('addGuideOk'))}</button></div><div class="modal-actions"><button class="secondary big-action w100" id="addGuideCancel">${esc(T('cancel'))}</button></div></div>`);
  $('#addGuideOk').onclick=()=>{closeModal();next()};
  $('#addGuideCancel').onclick=closeModal;
 }
+/* v5.4.0.1: заявка на VIP-статус (100 тенге в сутки). Уходит в Google-скрипт (action=vip),
+   бот присылает администратору сообщение с кнопками «Написать в WhatsApp» и «Позвонить». */
+const VIP_TARIFFS=[{days:'7',key:'vipT7'},{days:'14',key:'vipT14'},{days:'30',key:'vipT30'},{days:'90',key:'vipT90'},{days:'180',key:'vipT180'},{days:'365',key:'vipT365'},{days:'forever',key:'vipTForever'}];
+function siteBaseUrl(){try{return location.origin+location.pathname.replace(/[^/]*$/,'')}catch(e){return''}}
+/* v1.0.0.0: VIP в три шага. 1) плитки тарифов; 2) крупное окно-предупреждение о сверке телефона владельца
+   («ПОНЯТНО» / «НАЗАД / ОТМЕНА»); 3) анкета из 3 полей: ID карточки, имя, телефон. Сверку делает сайт по базе
+   выбранного села (она уже в памяти страницы): совпал телефон с карточкой → «Заявка отправлена», иначе → «Заявка отклонена». */
+function digitsOf(v){return String(v||'').replace(/\D/g,'')}
+function vipVerify(village,id,phone){
+ const v0=villageObj();const row=S.rows.find(r=>String(r.id)===String(id)&&(!v0||r.file===v0.file));
+ if(!row)return{ok:false,reason:'noId'};
+ const want=digitsOf(phone).slice(-10);
+ const have=[row.mobile1,row.mobile2,row.city].map(x=>digitsOf(x&&x!=='.'?x:'')).filter(Boolean).map(x=>x.slice(-10));
+ return have.includes(want)&&want.length===10?{ok:true,row}:{ok:false,reason:'phone'};
+}
+function vipResultModal(ok,reasonKey){
+ showModal(`<div class="modal-content vip-result ${ok?'vip-ok':'vip-no'}"><h2>${ok?'✅':'⛔'} ${esc(T(ok?'vipAccepted':'vipRejected'))}</h2><p class="vip-warn-text">${esc(T(ok?'vipAcceptedText':reasonKey))}</p><div class="modal-actions"><button class="primary big-action w100" id="vipResOk">${esc(T('vipResClose'))}</button></div></div>`);
+ $('#vipResOk').onclick=closeModal;
+}
+function openVipForm(){
+ showModal(`<div class="modal-content"><div class="form-head"><button class="back-capsule big-action" id="vipBack">⬅️ ${esc(T('back'))}</button><h2>${esc(T('vipFormTitle'))}</h2></div><div class="form-grid">
+  <div class="vip-rule" role="note">${esc(T('vipRule'))}</div>
+  <div class="vip-tariff-list"><b>${esc(T('vipTariffTitle'))}</b>${VIP_TARIFFS.map(t=>`<button type="button" class="vip-tariff-btn big-action" data-days="${t.days}">${esc(T(t.key))}</button>`).join('')}</div>
+ </div></div>`);
+ $('#vipBack').onclick=()=>{closeModal();openAdd()};
+ document.querySelectorAll('.vip-tariff-btn').forEach(b=>b.onclick=()=>vipWarn(b.dataset.days));
+}
+function vipWarn(days){
+ showModal(`<div class="modal-content vip-warn"><h2>⚠️ ${esc(T('vipWarnTitle'))}</h2><p class="vip-warn-text">${esc(T('vipWarnText'))}</p><div class="modal-actions vip-warn-actions"><button class="primary big-action w100" id="vipWarnOk">${esc(T('vipWarnOk'))}</button><button class="secondary big-action w100" id="vipWarnBack">${esc(T('vipWarnBack'))}</button></div></div>`);
+ $('#vipWarnOk').onclick=()=>vipApplyForm(days);
+ $('#vipWarnBack').onclick=closeModal;
+}
+function vipApplyForm(days){
+ const v0=villageObj(),village=v0?.name||S.village||'';
+ const tar=VIP_TARIFFS.find(t=>t.days===days);
+ showModal(`<div class="modal-content"><div class="form-head"><button class="back-capsule big-action" id="vipBack">⬅️ ${esc(T('back'))}</button><h2>${esc(T('vipFormTitle'))}</h2></div><form id="vipForm" class="form-grid" autocomplete="off">
+  <div class="vip-village">📍 ${esc(villageLabel(village))}</div>
+  <div class="vip-chosen">${esc(T(tar?tar.key:'vipTariffTitle'))}</div>
+  <label>${esc(T('vipIdLabel'))}<input id="vipId" name="cardId" inputmode="numeric" autocomplete="off" maxlength="6" placeholder="10061"></label>
+  <div class="vip-id-help" role="note">${esc(T('vipIdHelp'))}</div>
+  <label>${esc(T('vipOwnerLabel'))}<input id="vipOwner" name="owner"></label>
+  <label>${esc(T('vipPhoneLabel'))}<div class="phone-split"><span class="phone-fixed grey">+7</span><input id="vipPhone" name="phone" inputmode="numeric" autocomplete="off" maxlength="14" placeholder="705 123 45 67"></div></label>
+  <div class="form-actions-row"><button class="vip-apply big-action" type="submit" id="vipSend">${esc(T('vipSend'))}</button><button class="secondary big-action" type="button" id="vipCancel">${esc(T('cancel'))}</button></div>
+ </form></div>`);
+ $('#vipBack').onclick=openVipForm;$('#vipCancel').onclick=closeModal;
+ $('#vipForm').onsubmit=async e=>{
+  e.preventDefault();
+  const id=digitsOf($('#vipId').value),owner=clean($('#vipOwner').value),phone=sanitizeMobileE164($('#vipPhone').value);
+  if(!id){banner(T('vipNeedId'),true);return}
+  if(!owner){banner(T('vipNeedOwner'),true);return}
+  if(phone==='.'){banner(T('vipBadPhone'),true);return}
+  let chk=vipVerify(village,id,phone);
+  /* v1.0.0.0: если запущен локальный сервер, сверку делает Python по файлу базы (главный судья); иначе — сайт по базе села в памяти */
+  try{const rr=await fetch('/__vipcheck',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({file:v0?.file||'',id,phone}),cache:'no-store'});const jj=rr.ok?await rr.json():null;
+   if(jj&&jj.ok&&(jj.result==='ok'||jj.result==='no_id'||jj.result==='phone')){if(jj.result==='ok'){if(!chk.row)chk={ok:true,row:S.rows.find(x=>String(x.id)===String(id))||{title:''}};else chk.ok=true}else chk={ok:false,reason:jj.result==='no_id'?'noId':'phone'}}}catch(e){}
+  if(!chk.ok){vipResultModal(false,chk.reason==='noId'?'vipRejNoId':'vipRejPhone');return}
+  if(!intakeUrl()){banner(T('tgNeedUrlToast'),true);return}
+  const btn=$('#vipSend');btn.disabled=true;
+  let r=null;try{r=await intakePost({action:'vip',uid:'vip'+Date.now().toString(36)+Math.random().toString(36).slice(2,8),village,title:chk.row.title,owner,phone,days,promo:'',cardId:id,siteUrl:siteBaseUrl()})}catch(err){r=null}
+  btn.disabled=false;
+  if(r&&r.ok)vipResultModal(true);
+  else banner(T('vipFail',{error:r?tgErrText(r):T('vipNoLink')}),true);
+ };
+}
 function openAddForm(mode,draft,opts){
- if(!draft&&!(opts&&opts.skipGuide)){showAddGuide(()=>openAddForm(mode,draft,{skipGuide:true}));return}
+ if(!draft&&!(opts&&opts.skipGuide)){showAddGuide(()=>openAddForm(mode,draft,{skipGuide:true}),mode);return}
  const resident=mode==='resident',v0=villageObj();
  const d=draft||{};
  const villageName=d.geo||v0?.name||'Дарьинское';
@@ -1549,7 +1746,7 @@ function ghHeaders(){return S.token?{Authorization:`Bearer ${S.token}`,Accept:'a
 async function readGitFile(path){const repo=CONFIG.REPO;if(!repo||!CONFIG.OWNER)throw Error('repository not configured');const r=await fetch(`${CONFIG.API}/repos/${encodeURIComponent(CONFIG.OWNER)}/${encodeURIComponent(repo)}/contents/${path}?ref=${encodeURIComponent(CONFIG.BRANCH)}`,{headers:ghHeaders(),cache:'no-store'});if(!r.ok)throw Error(`GET ${r.status}`);const d=await r.json();return{content:fromB64(d.content||''),sha:d.sha}}
 let commitChain=Promise.resolve();
 function queuedWrite(fn){const next=commitChain.then(fn,fn);commitChain=next.catch(()=>{});return next}
-async function githubWrite(path,content,message){if(!S.token)throw Error('GitHub token required');const repo=CONFIG.REPO;if(!repo||!CONFIG.OWNER)throw Error('repository not configured');return queuedWrite(async()=>{for(let a=0;a<4;a++){const cur=await readGitFile(path).catch(()=>({content:'',sha:null})),body={message,content:toB64(content),branch:CONFIG.BRANCH};if(cur.sha)body.sha=cur.sha;const r=await fetch(`${CONFIG.API}/repos/${encodeURIComponent(CONFIG.OWNER)}/${encodeURIComponent(repo)}/contents/${path}`,{method:'PUT',headers:ghHeaders(),body:JSON.stringify(body)});if(r.ok)return r.json();if(r.status===409){await new Promise(res=>setTimeout(res,500));continue}throw Error(`PUT ${r.status}`)}throw Error('GitHub conflict')})}
+async function githubWrite(path,content,message){if(!hasMaster())throw Error('read_only');if(!S.token)throw Error('GitHub token required');const repo=CONFIG.REPO;if(!repo||!CONFIG.OWNER)throw Error('repository not configured');return queuedWrite(async()=>{for(let a=0;a<4;a++){const cur=await readGitFile(path).catch(()=>({content:'',sha:null})),body={message,content:toB64(content),branch:CONFIG.BRANCH};if(cur.sha)body.sha=cur.sha;const r=await fetch(`${CONFIG.API}/repos/${encodeURIComponent(CONFIG.OWNER)}/${encodeURIComponent(repo)}/contents/${path}`,{method:'PUT',headers:ghHeaders(),body:JSON.stringify(body)});if(r.ok)return r.json();if(r.status===409){await new Promise(res=>setTimeout(res,500));continue}throw Error(`PUT ${r.status}`)}throw Error('GitHub conflict')})}
 /* v5.2.0.1: Оперативный рапорт переписан с нуля. Убрана строка «Валидно»
    и сломанная nextFreeId() (которая на пустой базе всегда лгала «1»).
    Теперь по каждому селу — отдельный разрез Коммерция (Г18=0) / Жители
@@ -1623,7 +1820,7 @@ function countsOfText(text){
  for(const ln of String(text||'').replace(/^\uFEFF/,'').split(/\r?\n/)){
   const raw=clean(ln);if(!raw||raw.startsWith('#'))continue;
   const f=raw.split(' | ').map(clean);if(f.length!==20)continue;
-  if(isQuarantineMarker(f[19]))continue;
+  if(isQuarantineMarker(f[19])||CHAT_MARKER_RE.test(f[19]))continue;
   if(f[1].toUpperCase()==='ЖИТЕЛИ')r++;else b++;
  }
  return[b,r];
@@ -1673,7 +1870,7 @@ function openGeomodal(onPick,districtSlugOverride,onCancel){
  const hiddenVillages=allVillages.filter(v=>!withData.includes(v));
  const villageBtn=v=>{const c=cntOf(v);return `<button type="button" class="sector-btn big-action village-row" data-village="${esc(v.nameRu)}"><span class="vname">${esc(villageLabel(v.nameRu))}${v.nameRu===current?' ✓':''}</span><span class="vcnt"><b class="cnt cnt-biz" title="${esc(T('cntBizTitle'))}" aria-label="${esc(T('cntBizTitle'))}">${c[0]}</b><b class="cnt cnt-res" title="${esc(T('cntResTitle'))}" aria-label="${esc(T('cntResTitle'))}">${c[1]}</b></span></button>`};
  const hiddenHtml=hiddenVillages.length?`<details class="search-pocket rest-pocket" id="geoHiddenVillages"><summary><span class="pk-closed">${esc(T('geoRestOpenTitle'))}</span><span class="pk-open">${esc(T('geoRestCloseTitle'))}</span></summary><div class="sector-grid search-pocket-body">${hiddenVillages.map(villageBtn).join('')}</div></details>`:'';
- showModal(`<div class="modal-content"><div class="form-head"><button class="back-capsule big-action" id="geoBack">⬅️ ${esc(T('back'))}</button><h2>🗺️ ${esc(districtName(district)||T('villagePickerTitle').replace('🗺️ ',''))}</h2></div>
+ showModal(`<div class="modal-content"><div class="form-head geo-sticky-head"><button class="back-capsule big-action" id="geoBack">⬅️ ${esc(T('back'))}</button><h2>🗺️ ${esc(districtName(district)||T('villagePickerTitle').replace('🗺️ ',''))}</h2></div>
   <p class="cnt-legend">${esc(T('cntLegend'))}</p>
   <div class="sector-grid">${villages.map(villageBtn).join('')}</div>
   ${hiddenHtml}
@@ -1841,7 +2038,8 @@ async function vipMonitor(){
    файле) не создаётся. */
 async function appendToLocalServer(file,line){
  try{
-  const r=await fetch('/__append',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({file,line}),cache:'no-store'});
+  if(!hasMaster())return false;
+  const r=await fetch('/__append',{method:'POST',headers:srvHeaders(),body:JSON.stringify({file,line}),cache:'no-store'});
   if(!r.ok)return false;
   const j=await r.json();
   return j&&j.ok?(j.duplicate?'dup':true):false;
@@ -1867,7 +2065,7 @@ async function appendToGithub(file,line){
    смена порта = новый адрес) — только в памяти вкладки. */
 function saveAdminPin(){ADMIN_PIN_OK=true;storageSet('cart_admin_pin_ok','1');idbRun('kv','readwrite',os=>os.put('1','admin_pin_ok'))}
 /* Поле пароля: символы скрыты точками, справа «глазик» (тап — показать/скрыть). */
-function pwField(id,ph){return `<span class="pw-wrap"><input id="${id}" type="password" placeholder="${esc(ph)}" autocomplete="off" autocapitalize="off" spellcheck="false"><button type="button" class="pw-eye" data-eye="${id}" aria-label="${esc(T('eyeToggle'))}">👁</button></span>`}
+function pwField(id,ph,val){return `<span class="pw-wrap"><input id="${id}" type="password" value="${esc(val||'')}" placeholder="${esc(ph)}" autocomplete="off" autocapitalize="off" spellcheck="false"><button type="button" class="pw-eye" data-eye="${id}" aria-label="${esc(T('eyeToggle'))}">👁</button></span>`}
 function bindEyes(root){(root||document).querySelectorAll('.pw-eye').forEach(b=>{b.onclick=()=>{const i=document.getElementById(b.dataset.eye);if(!i)return;const show=i.type==='password';i.type=show?'text':'password';b.textContent=show?'🙈':'👁';b.classList.toggle('on',show)}})}
 
 /* ===== v5.3.0.5: «ЗАПОМНИТЬ МЕНЯ НА ЭТОМ УСТРОЙСТВЕ» =====
@@ -1915,10 +2113,64 @@ async function vaultRestore(){
  if(v.code&&!ADMIN_CODE_MEM)ADMIN_CODE_MEM=v.code;
  if(v.token&&!S.token){S.token=v.token;relayAdminTokenToSw(v.token)}
 }
+/* v1.0.0.0: ДВА ЗАМКА. Код входа открывает пульт в режиме «Только чтение»; изменения (запись, отправка, облачные действия)
+   требуют Мастер-пароля: сервер выдаёт временную сессию (10 минут). Пароль и сессия живут только в памяти страницы. */
+let MSESS='',MSESS_UNTIL=0,MASTER_MEM='';
+const MUT_ACTIONS=['setStatus','reid','setTelegram','testTelegram'];
+function hasMaster(){if(MSESS&&Date.now()<MSESS_UNTIL)return true;MSESS='';MASTER_MEM='';return false}
+function srvHeaders(){const h={'Content-Type':'application/json'};if(MSESS)h['X-Cart-Session']=MSESS;return h}
+async function masterLock(){MSESS='';MSESS_UNTIL=0;MASTER_MEM='';try{await fetch('/__lock',{method:'POST',cache:'no-store'})}catch(e){}}
+function masterModal(onOk){
+ const old=document.getElementById('masterOverlay');if(old)old.remove();
+ const d=document.createElement('div');d.id='masterOverlay';d.className='master-overlay';
+ d.innerHTML=`<div class="master-box"><h3>${esc(T('masterTitle'))}</h3><div class="hint">${esc(T('masterHint'))}</div>${pwField('masterInput',T('masterPlaceholder'))}<input type="text" id="masterPath" value="${esc(storageGet('cart_secrets_path',''))}" placeholder="${esc(T('secretsPathPlaceholder'))}" autocomplete="off" autocapitalize="off" spellcheck="false"><div class="modal-actions"><button class="primary" id="masterOk">${esc(T('masterOkBtn'))}</button><button class="secondary" id="masterCancel">${esc(T('masterCancelBtn'))}</button></div></div>`;
+ document.body.appendChild(d);bindEyes(d);
+ const shut=()=>{d.remove()};
+ const go=async()=>{
+  const m=normPhrase($('#masterInput').value);if(!m){toast(T('badCodeToast'));return}
+  const path=clean($('#masterPath').value);if(path)try{storageSet('cart_secrets_path',path)}catch(e){}
+  let r=null;try{const resp=await fetch('/__unlock',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:adminCode(),master:m,path}),cache:'no-store'});r=resp.ok?await resp.json():null}catch(e){r=null}
+  if(!r){banner(T('needServer'),true);return}
+  if(r.ok){MSESS=r.session;MSESS_UNTIL=Date.now()+(r.ttl||600)*1000-5000;MASTER_MEM=m;shut();toast(T('masterOpenToast'));if(onOk)onOk()}
+  else{const k=String(r.error||'');banner(T(k==='wait'?'authWaitToast':k.indexOf('master_first_')===0?'masterFirstFail':'masterBadToast'),true);$('#masterInput').value=''}
+ };
+ $('#masterOk').onclick=go;$('#masterInput').addEventListener('keydown',e=>{if(e.key==='Enter')go()});
+ $('#masterCancel').onclick=shut;
+ setTimeout(()=>{try{$('#masterInput').focus()}catch(e){}},50);
+}
+/* Оборачивает кнопку изменения: без сессии мастера открывает окно пароля и только после него выполняет действие. */
+function gated(fn){return function(){const a=arguments,self=this;if(hasMaster())return fn.apply(self,a);masterModal(()=>fn.apply(self,a))}}
+/* Тревога: пульт зажат на устройстве без нашего сервера. Сигнал в Telegram: марка, IP, город, время. Не чаще раза в 5 минут. */
+async function foreignAlarm(){
+ try{
+  const last=Number(storageGet('cart_alarm_last','0'))||0;if(Date.now()-last<300000)return;
+  storageSet('cart_alarm_last',String(Date.now()));
+  if(!intakeUrl())return;
+  const ua=navigator.userAgent||'';
+  const m=/\(([^)]*)\)/.exec(ua);const device=(m?m[1]:ua).slice(0,80);
+  let ip='',city='';
+  const tf=async(u)=>{const c=typeof AbortController==='function'?new AbortController():null;const t=c?setTimeout(()=>c.abort(),4000):0;try{const r=await fetch(u,{cache:'no-store',signal:c?c.signal:undefined});return r.ok?await r.json():null}catch(e){return null}finally{if(t)clearTimeout(t)}};
+  const a=await tf('https://api.ipify.org?format=json');if(a&&a.ip)ip=String(a.ip);
+  const b=await tf('https://ipapi.co/'+(ip?encodeURIComponent(ip)+'/':'')+'json/');if(b&&(b.city||b.country_name))city=[b.city,b.country_name].filter(Boolean).join(', ');
+  await intakePost({action:'alarm',device,ip,city});
+ }catch(e){}
+}
+async function serverAlive(){try{const r=await fetch('/__ping',{cache:'no-store'});if(!r.ok)return false;const j=await r.json();return !!(j&&j.ok)}catch(e){return false}}
 function adminPinModal(){
  showModal(`<div class="modal admin-dark"><h2>${esc(T('adminPinTitle'))}</h2><div class="form-grid">${pwField('adminPinInput',T('adminPinPlaceholder'))}<label class="remember-row"><input type="checkbox" id="adminRememberChk" checked> ${esc(T('rememberMe'))}</label></div><div class="modal-actions"><button class="primary" id="adminPinOk">${esc(T('adminPinOkBtn'))}</button><button class="secondary" id="adminPinCancel">${esc(T('adminClose'))}</button></div></div>`);
  bindEyes($('#modalRoot'));
- const go=async()=>{const v=$('#adminPinInput').value;if(isAdminPin(v)){const rem=$('#adminRememberChk')?.checked;if(rem){saveAdminPin();await vaultSave();toast(T('rememberMeSaved'))}else ADMIN_PIN_OK=true;closeModal();adminOpen()}else{toast(T('badCodeToast'));$('#adminPinInput').value=''}};
+ const go=async()=>{
+  const v=$('#adminPinInput').value;if(!clean(v)){toast(T('badCodeToast'));return}
+  let r=null;try{const resp=await fetch('/__auth',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:normPhrase(v)}),cache:'no-store'});r=resp.ok?await resp.json():null}catch(e){r=null}
+  if(!r){banner(T('needServer'),true);return}
+  if(r.ok){
+   saveAdminCode(normPhrase(v));
+   const rem=$('#adminRememberChk')?.checked;
+   if(rem){saveAdminPin();await vaultSave();toast(T('rememberMeSaved'))}else ADMIN_PIN_OK=true;
+   if(r.first)toast(T('authFirstToast'));
+   closeModal();adminOpen();
+  }else{banner(T(r.error==='wait'?'authWaitToast':'badCodeToast'),true);$('#adminPinInput').value=''}
+ };
  $('#adminPinOk').onclick=go;$('#adminPinInput').addEventListener('keydown',e=>{if(e.key==='Enter')go()});
  $('#adminPinCancel').onclick=closeModal;
  setTimeout(()=>{try{$('#adminPinInput').focus()}catch(e){}},50);
@@ -1934,45 +2186,161 @@ async function adminIntake(payload){
  const code=adminCode();
  if(!intakeUrl())return {ok:false,error:'no_url'};
  if(!code)return {ok:false,error:'no_code'};
- try{const r=await intakePost(Object.assign({code},payload));return r||{ok:false,error:'network'}}catch(e){return {ok:false,error:'network'}}
+ const mut=MUT_ACTIONS.indexOf(payload&&payload.action)>=0;
+ if(mut&&!hasMaster())return {ok:false,error:'locked'};
+ try{const r=await intakePost(Object.assign({code},mut?{master:MASTER_MEM}:{},payload));return r||{ok:false,error:'network'}}catch(e){return {ok:false,error:'network'}}
 }
 function intakeErrorText(res){
  const e=res&&res.error;
  if(e==='no_url')return T('intakeNoUrlToast');
  if(e==='no_code')return T('intakeNoCodeToast');
  if(e==='forbidden')return T('intakeForbiddenToast');
+ if(e==='locked'||e==='master_required')return T('masterLockedToast');
  return T('intakeNetworkToast');
 }
-function copyLineOf(item){
+/* ===== v1.0.0.0: БРОНЯ ОЧЕРЕДИ ЗАЯВОК ===== */
+/* Правки администратора (опечатки) живут в памяти вкладки по uid заявки и подхватываются ВСЕМИ кнопками: Одобрить, В файл + Буфер, В GitHub. */
+const QEDIT=new Map((()=>{try{return JSON.parse(storageGetSession('cart_qedit','[]'))||[]}catch(e){return []}})());
+function qeditSave(){try{storageSetSession('cart_qedit',JSON.stringify(Array.from(QEDIT.entries())))}catch(e){}}
+function baseLineOf(item){
  const lines=String(item.row||item.candidateRow||'').split('\n').filter(Boolean);
  const last=lines[lines.length-1]||'';
- return item.kind==='DELETE'?last:markerSwap(last,'$');
+ return item.kind==='DELETE'||isChatRow(last)?last:markerSwap(last,'$');
 }
-let QAUDIT={flags:new Map(),plan:[]};
+function copyLineOf(item){return QEDIT.get(item.uid)||baseLineOf(item)}
+function origOf(item){
+ if(item.kind!=='EDIT')return '';
+ if(item.original)return markerSwap(item.original.split('\n').filter(Boolean)[0]||'','$');
+ const lines=String(item.candidateRow||'').split('\n').filter(Boolean);
+ return lines.length>1?markerSwap(lines[0],'$'):'';
+}
+/* Радар правок: индексы граф, которые отличаются (сравнение по номеру графы, пробелы по краям не важны). */
+function diffIdx(a,b){
+ const x=String(a||'').split(' | '),y=String(b||'').split(' | '),out=new Set();
+ for(let i=0;i<Math.max(x.length,y.length);i++)if(String(x[i]??'').trim()!==String(y[i]??'').trim())out.add(i);
+ return out;
+}
+function diffLineHtml(line,set,cls){
+ return String(line||'').split(' | ').map((v,i)=>set&&set.has(i)?`<span class="${cls}">${esc(v)}</span>`:`<span class="df-same">${esc(v)}</span>`).join(' | ');
+}
 function queueCardHtml(item,source){
  if(!item||!(item.row||item.candidateRow))return `<div class="warn-card">${esc(T('queueBadRecordLine'))}</div>`;
- const line=copyLineOf(item);
+ const line=copyLineOf(item),orig=origOf(item);
  const f=line.split(' | ');
- const title=f[2]||'.',folder=f[1]||'.',village=f[10]||'.';
+ const chat=isChatRow(line);
+ const title=chat?(f[1]||'.'):(f[2]||'.'),folder=chat?T('chatKind_'+f[19].trim()):(f[1]||'.'),village=chat?(item.village||'—'):(f[10]||'.');
  const status=source==='remote'?(item.status||'Новая'):(item.sendError?'⚠ '+item.sendError:'');
- const kind=item.kind||'NEW';
- let buttons='';
- if(source==='remote'){
-  const idBad=QAUDIT.flags.has(item.uid);
-  if(status==='Новая'&&!idBad)buttons+=`<button class="primary" data-apply-uid="${esc(item.uid)}">${esc(T('queueApplyBtn'))}</button>`;
-  if(idBad)buttons+=`<span class="queue-blocked">${esc(T('queueApplyBlocked'))}</span>`;
-  if(!idBad)buttons+=`<button class="secondary" data-queue-copy="${esc(line)}">${esc(T('queueCopyBtn'))}</button>`;
-  if(status==='Одобрена'&&kind==='NEW'&&item.file&&!idBad){
-   buttons+=`<button class="secondary" data-local-write="${esc(item.uid)}" data-wfile="${esc(item.file)}" data-wline="${esc(line)}">${esc(T('queueLocalWriteBtn'))}</button>`;
-   buttons+=`<button class="secondary" data-github-write="${esc(item.uid)}" data-wfile="${esc(item.file)}" data-wline="${esc(line)}">${esc(T('queueGithubBtn'))}</button>`;
-  }
-  if(status==='Одобрена')buttons+=`<button class="primary" data-done-uid="${esc(item.uid)}">${esc(T('queueDoneBtn'))}</button>`;
-  buttons+=`<button class="secondary" data-reject-uid="${esc(item.uid)}" data-reject-src="remote">${esc(T('queueRejectBtn'))}</button>`;
- }else{
-  buttons+=`<button class="secondary" data-queue-copy="${esc(line)}">${esc(T('queueCopyBtn'))}</button><button class="secondary" data-reject-uid="${esc(item.uid)}" data-reject-src="local">${esc(T('queueRejectBtn'))}</button>`;
+ const kind=item.kind||'NEW',uid=esc(item.uid);
+ const isRemote=source==='remote';
+ const idBad=isRemote&&QAUDIT.flags.has(item.uid);
+ const head=`<b>${esc(kind)}</b>${status?` · ${esc(status)}`:''}${QEDIT.has(item.uid)?` · ✎`:''} · ID ${esc(f[0]||'')} · ${esc(title)}<br>${chat?'💬':'📂'} ${esc(folder)} · 📍 ${esc(village)}${item.reason?`<br>${esc(item.reason)}`:''}`;
+ /* Жалоба «Ссылка сброшена» на плашку чата: один красный клик стирает строку на телефоне и на GitHub */
+ if(chat&&kind==='DELETE'){
+  const n=Array.from(QITEMS.values()).filter(x=>x.item.kind==='DELETE'&&x.item.file===item.file&&String(x.item.id||'').replace(/^0+/,'')===String(item.id||f[0]).replace(/^0+/,'')&&(x.item.status||'Новая')==='Новая').length||1;
+  const can=isRemote&&(status==='Новая'||status==='Одобрена');
+  return `<div class="admin-card q-card" data-quid="${uid}">${head}<br>👥 ${esc(T('chatReportsN',{n}))}<div class="df-cap">${esc(f[3]||'')}</div><div class="queue-row-actions q-two"><button class="qb-chatdel" data-q-chatdel="${uid}"${can?'':' disabled'}>${esc(T('qbChatDel'))}</button><button class="qb-reject" data-q-reject="${uid}" data-q-src="${isRemote?'remote':'local'}">${esc(T('qbChatAlive'))}</button></div>${can?'':`<div class="q-why">${esc(T('qWhyLocal'))}</div>`}</div>`;
  }
- return `<div class="admin-card"><b>${esc(kind)}</b>${status?` · ${esc(status)}`:''} · ID ${esc(f[0]||'')} · ${esc(title)}<br>📂 ${esc(folder)} · 📍 ${esc(village)}${item.reason?`<br>${esc(item.reason)}`:''}<div class="queue-row-mono">${esc(item.kind==='EDIT'&&item.original?item.original+'\n'+item.row:(item.row||item.candidateRow))}</div><div class="queue-row-actions">${buttons}</div></div>`;
+ const canApprove=(!isRemote&&!item.sendError)||(isRemote&&status==='Новая');
+ const canWrite=isRemote&&status==='Одобрена'&&kind!=='DELETE';
+ const canDone=isRemote&&status==='Одобрена';
+ const dis=ok=>ok?'':' disabled';
+ const buttons=`<button class="qb-approve" data-q-approve="${uid}"${dis(canApprove)}>${esc(T('qbApprove'))}</button>
+  <button class="qb-edit" data-q-edit="${uid}">${esc(T('qbEdit'))}</button>
+  <button class="qb-file" data-q-file="${uid}"${dis(canWrite)}>${esc(T('qbFile'))}</button>
+  <button class="qb-gh" data-q-gh="${uid}"${dis(canWrite)}>${esc(T('qbGithub'))}</button>
+  <button class="qb-done" data-q-done="${uid}"${dis(canDone)}>${esc(T('qbDone'))}</button>
+  <button class="qb-reject" data-q-reject="${uid}" data-q-src="${isRemote?'remote':'local'}">${esc(T('qbReject'))}</button>`;
+ /* Подсказка: почему серые кнопки */
+ let why='';
+ if(!canApprove&&!canWrite)why=isRemote?(status==='Одобрена'?'':T('qWhyStatus',{status})):T('qWhyLocalErr');
+ else if(!canWrite&&kind!=='DELETE')why=T('qWhyWrite');
+ const dset=orig?diffIdx(orig,line):null;
+ const blocks=orig
+  ?`<div class="df-cap">${esc(T('dfWas'))}</div><div class="queue-row-mono" data-qv="${uid}">${diffLineHtml(orig,dset,'df-old')}</div><div class="df-cap">${esc(T('dfNow'))} · ${esc(T('dfCount',{n:dset.size}))}</div><div class="queue-row-mono" data-qv="${uid}">${diffLineHtml(line,dset,'df-new')}</div>`
+  :`<div class="queue-row-mono" data-qv="${uid}">${esc(line)}</div>`;
+ return `<div class="admin-card q-card" data-quid="${uid}">${head}${idBad?`<br><span class="queue-blocked">${esc(T('qIdWarn'))}</span>`:''}${blocks}<div class="queue-row-actions q-six">${buttons}</div>${why?`<div class="q-why">${esc(why)}</div>`:''}</div>`;
 }
+let QITEMS=new Map();
+let QAUDIT={flags:new Map(),plan:[]};
+/* Окно «Полная строка»: читать (радар красный/зелёный) или Редактировать (20 полей ввода). Отдельный слой поверх пульта: очередь под ним не сбрасывается. */
+/* v1.0.0.0: АВТОСВЯЗКА Г2↔Г1. Название категории в Г2 («Главная — Подкатегория») -> индексы плитки C и подкатегории T1.
+   Узнаёт названия на обоих языках. Возвращает {c,sb} либо null (не бизнес-папка/не найдено). */
+function folderToIds(folder){
+ const f=String(folder||'').split('—').map(x=>x.trim().toLowerCase());if(!f[0]||f[0]==='жители')return null;
+ const st=SUPER_TILES.find(x=>[x.ru,x.kz].some(n=>String(n||'').trim().toLowerCase()===f[0]));if(!st)return null;
+ if(!f[1])return null;
+ const sb=(SUB_TILES[st.id]||[]).find(x=>[x.ru,x.kz].some(n=>String(n||'').trim().toLowerCase()===f[1]));
+ return sb?{c:st.id,sb:sb.sub}:null;
+}
+/* Пересчёт Г1 и масок Г17/Г19 под категорию из Г2. vals — 20 граф; возвращает {vals,log} либо null, если связка уже верна. */
+function linkFolderToId(vals,file,ownId){
+ const ids=folderToIds(vals[1]);if(!ids||isChatRow(vals.join(' | ')))return null;
+ const curC=idTile(vals[0]),curS=idSub(vals[0]);
+ if(curC===ids.c&&curS===ids.sb)return null;
+ const used=zoneUsedIds(file);used.delete(Number(ownId));
+ const nid=nextZoneId(file,false,ids.c,ids.sb,used);
+ const out=vals.slice(),hp=String(out[16]).split('/');
+ if(hp.length===10){hp[1]=String(ids.c);hp[2]=String(ids.sb);hp[3]='0';out[16]=hp.join('/')}
+ const sp=String(out[18]).split('/');
+ if(sp.length===7){sp[4]='0';out[18]=sp.join('/')}
+ out[0]=nid;
+ return{vals:out,log:`Г2 «${vals[1]}» → плитка ${ids.c}, подкатегория ${ids.sb}; Г1 ${vals[0]} → ${nid}; Г17 и Г19 пересчитаны`};
+}
+function rowViewer(item,edit){
+ const old=document.getElementById('rowViewer');if(old)old.remove();
+ const line=copyLineOf(item),orig=origOf(item);
+ const d=document.createElement('div');d.id='rowViewer';d.className='master-overlay row-viewer';
+ const cells=(l,set,cls)=>`<div class="rv-fields">${l.split(' | ').map((x,i)=>`<div class="rv-f ${set&&set.has(i)?cls:''}"><b>Г${i+1}</b><span>${esc(x)}</span></div>`).join('')}</div>`;
+ let html;
+ if(edit){
+  const base=baseLineOf(item),ref=orig||base;
+  html=`<h3>${esc(T('rowEditTitle'))}</h3><div class="hint">${esc(T('rowEditHint'))}</div><div class="rv-fields rv-edit">${line.split(' | ').map((x,i)=>`<label class="rv-f"><b>Г${i+1}</b><input data-g="${i}" value="${esc(x)}" autocomplete="off" autocapitalize="off" spellcheck="false"></label>`).join('')}</div><div class="rv-msg" id="rvMsg"></div><div class="modal-actions"><button class="primary" id="rvApply" type="button">${esc(T('rowApplyBtn'))}</button><button class="secondary" id="rvCancel" type="button">${esc(T('addCancelBtn'))}</button></div>`;
+  d.innerHTML=`<div class="master-box row-viewer-box">${html}</div>`;document.body.appendChild(d);
+  const get=()=>Array.from(d.querySelectorAll('input[data-g]')).map(i=>i.value.trim()||'.');
+  const paint=()=>{const cur=get().join(' | '),set=diffIdx(ref,cur);d.querySelectorAll('input[data-g]').forEach((i,k)=>i.classList.toggle(orig?'df-new':'df-new',set.has(k)))};
+  d.querySelectorAll('input[data-g]').forEach(i=>i.addEventListener('input',paint));paint();
+  const relink=(announce)=>{const r=linkFolderToId(get(),item.file,(orig||baseLineOf(item)).split(' | ')[0]);if(!r)return null;
+   d.querySelectorAll('input[data-g]').forEach((i,k)=>{i.value=r.vals[k]});paint();
+   if(announce){const m=$('#rvMsg');if(m)m.textContent='🔗 '+r.log}try{console.info('[миграция]',r.log)}catch(e){}return r};
+  const g2=d.querySelector('input[data-g="1"]');if(g2)g2.addEventListener('change',()=>relink(true));
+  $('#rvCancel').onclick=()=>rowViewer(item,false);
+  $('#rvApply').onclick=async()=>{
+   const msg=$('#rvMsg');relink(false);const vals=get();
+   if(vals.some(v=>/\||[\r\n]/.test(v))){msg.textContent=T('rowErrBar');return}
+   const nl=vals.join(' | ');
+   if(!isChatRow(nl)){const audit=rowValidate(nl.split(' | ').map(clean),0,item.file);if(!audit.ok){msg.textContent=T('rowErrInvalid')+' '+audit.errors.join('; ');return}}
+   else if(!/^https?:\/\//i.test(vals[3])){msg.textContent=T('chatBadLinkToast');return}
+   const oid=(orig||baseLineOf(item)).split(' | ')[0].trim(),nid=vals[0].trim();
+   if(item.kind==='EDIT'&&nid!==oid){const own=folderToIds(vals[1]);if(!own||idTile(nid)!==own.c||idSub(nid)!==own.sb){msg.textContent=T('rowErrIdLocked');return}
+    try{await ensureFilesLoaded([item.file])}catch(e){}if(S.rows.some(r=>r.file===item.file&&r.id===nid)){msg.textContent=T('rowErrIdTaken');return}}
+   if(item.kind==='NEW'&&nid!==oid){try{await ensureFilesLoaded([item.file])}catch(e){}if(S.rows.some(r=>r.file===item.file&&r.id===nid)||(S.chats||[]).some(c=>c.file===item.file&&c.id===nid)){msg.textContent=T('rowErrIdTaken');return}}
+   if(nl===baseLineOf(item))QEDIT.delete(item.uid);else QEDIT.set(item.uid,nl);
+   qeditSave();
+   let cloud='';
+   if(QITEMS.get(item.uid)?.src==='remote'&&QEDIT.has(item.uid)){const r=await adminIntake({action:'updateRow',uid:item.uid,row:nl});cloud=r&&r.ok?'ok':'fail';if(cloud==='fail')toast(intakeErrorText(r))}
+   d.remove();toast(T(cloud==='ok'?'rowSavedCloud':'rowSavedLocal'));requestQueueMonitor();
+  };
+  return;
+ }
+ const set=orig?diffIdx(orig,line):null;
+ html=`<h3>${esc(T('rowViewTitle'))}</h3>${orig?`<div class="df-cap">${esc(T('dfWas'))}</div><div class="rv-raw">${diffLineHtml(orig,set,'df-old')}</div>${cells(orig,set,'df-old')}<div class="df-cap">${esc(T('dfNow'))} · ${esc(T('dfCount',{n:set.size}))}</div>`:''}<div class="rv-raw">${orig?diffLineHtml(line,set,'df-new'):esc(line)}</div>${cells(line,set,'df-new')}<div class="modal-actions"><button class="primary" id="rvEdit" type="button">${esc(T('qbEdit'))}</button><button class="secondary" id="rvClose" type="button">${esc(T('adminClose'))}</button></div>`;
+ d.innerHTML=`<div class="master-box row-viewer-box">${html}</div>`;document.body.appendChild(d);
+ const shut=()=>d.remove();
+ $('#rvClose').onclick=shut;$('#rvEdit').onclick=()=>rowViewer(item,true);d.addEventListener('click',e=>{if(e.target===d)shut()});
+}
+async function localOp(file,kind,line,original){
+ try{
+  const r=await fetch('/__append',{method:'POST',headers:srvHeaders(),body:JSON.stringify({file,line,kind,original}),cache:'no-store'});
+  const j=await r.json();return j||{ok:false,error:'network'};
+ }catch(e){return {ok:false,error:'network'}}
+}
+async function ghPush(file,kind,line,original){
+ try{
+  const r=await fetch('/__github_push',{method:'POST',headers:srvHeaders(),body:JSON.stringify({file,line,kind,original}),cache:'no-store'});
+  return await r.json();
+ }catch(e){return {ok:false,error:'network'}}
+}
+const qErr=c=>{const k='qe_'+(c||'x');const t=T(k);return t===k?String(c||'?'):t};
 async function requestQueueMonitor(){
  let remote=[],errNote='';
  const res=await adminIntake({action:'list'});
@@ -1980,27 +2348,81 @@ async function requestQueueMonitor(){
  QAUDIT=auditQueueIds(remote);
  const idWarn=QAUDIT.plan.length?`<div class="warn-card queue-idwarn"><b>⚠ ${esc(T('queueIdMismatch'))}</b><div class="queue-id-preview">${QAUDIT.plan.map(p=>`${esc(p.oldId)} → ${esc(p.id)} · ${esc(p.title)}`).join('<br>')}</div><button class="primary" id="queueRecalcBtn">${esc(T('queueIdRecalcBtn'))}</button></div>`:'';
  const local=queueLocal().map(q=>Object.assign({},q,{row:String(q.candidateRow||'').split('\n').filter(Boolean).pop()||''}));
+ QITEMS=new Map();remote.forEach(r=>QITEMS.set(r.uid,{item:r,src:'remote',file:r.file}));local.forEach(r=>QITEMS.set(r.uid,{item:r,src:'local',file:r.file}));
  const html=[...remote.map(r=>queueCardHtml(r,'remote')),...local.map(r=>queueCardHtml(r,'local'))].join('');
  showModal(`<div class="modal-content admin-dark">${adminHead(T('queueTitle'))}<div class="admin-card">${esc(T('queueCounts',{remote:remote.length,local:local.length}))}</div>${errNote?`<div class="warn-card">${esc(errNote)}</div>`:''}${idWarn}${html||`<div class="ok-card">${esc(T('queueEmpty'))}</div>`}<div class="modal-actions"><button class="secondary" id="queueBack">${esc(T('adminHomeBtn'))}</button></div></div>`);
  bindAdminHome();$('#queueBack').onclick=adminOpen;
  const recalc=$('#queueRecalcBtn');
  if(recalc)recalc.onclick=async()=>{recalc.disabled=true;const r=await adminIntake({action:'reid',items:QAUDIT.plan.map(p=>({uid:p.uid,id:p.id,row:p.row}))});if(r&&r.ok){toast(T('queueIdRecalcOk',{n:r.changed||QAUDIT.plan.length}));requestQueueMonitor()}else{toast(r&&r.error==='id_clash'?T('queueIdRecalcFail'):intakeErrorText(r));recalc.disabled=false}};
- $$('[data-queue-copy]').forEach(b=>b.onclick=async()=>{try{await navigator.clipboard.writeText(b.dataset.queueCopy);toast(T('queueCopiedToast'))}catch(err){toast(T('copyFailToast'))}});
- const setStatus=async(uid,status)=>{const r=await adminIntake({action:'setStatus',uid,status});if(r&&r.ok){toast(T('queueStatusToast',{status}));requestQueueMonitor()}else toast(intakeErrorText(r))};
- $$('[data-local-write]').forEach(b=>b.onclick=async()=>{b.disabled=true;const ok=await appendToLocalServer(b.dataset.wfile,b.dataset.wline);toast(T(ok===true?'queueLocalWriteOkToast':ok==='dup'?'queueAlreadyThereToast':'queueLocalWriteFailToast'));b.disabled=false});
- $$('[data-github-write]').forEach(b=>b.onclick=async()=>{
-  b.disabled=true;
-  const r=await appendToGithub(b.dataset.wfile,b.dataset.wline);
-  if(r==='ok')autoAliasSync();
-  toast(T(r==='ok'?'queueGithubOkToast':r==='dup'?'queueAlreadyThereToast':r==='idclash'?'queueIdClashToast':r==='notoken'?'queueGithubNoTokenToast':'queueGithubFailToast'));
-  if(r==='ok'||r==='dup')await setStatus(b.dataset.githubWrite,'Внесена');else b.disabled=false;
- });
- $$('[data-apply-uid]').forEach(b=>b.onclick=()=>setStatus(b.dataset.applyUid,'Одобрена'));
- $$('[data-done-uid]').forEach(b=>b.onclick=()=>setStatus(b.dataset.doneUid,'Внесена'));
- $$('[data-reject-uid]').forEach(b=>b.onclick=()=>{
-  if(b.dataset.rejectSrc==='local'){removeQueueLocal(b.dataset.rejectUid);toast(T('queueRejectedToast'));requestQueueMonitor()}
-  else setStatus(b.dataset.rejectUid,'Отклонена');
- });
+ const itemOf=uid=>QITEMS.get(uid)?Object.assign({},QITEMS.get(uid).item,{uid,file:QITEMS.get(uid).item.file}):null;
+ const run=(b,fn)=>{b.onclick=()=>{const go=async()=>{if(b.disabled)return;b.disabled=true;try{await fn(b)}finally{if(b.isConnected)b.disabled=false}};if(hasMaster())go();else masterModal(go)}};
+ $$('.queue-row-mono[data-qv]').forEach(el=>{el.style.cursor='pointer';el.onclick=()=>{const it=itemOf(el.dataset.qv);if(it)rowViewer(it,false)}});
+ const setStatus=async(uid,status)=>{const r=await adminIntake({action:'setStatus',uid,status});if(r&&r.ok){toast(T('queueStatusToast',{status}));return true}toast(intakeErrorText(r));return false};
+ const localReport=(r,kind)=>r&&r.ok?(r.duplicate?'queueAlreadyThereToast':'queueLocalWriteOkToast'):null;
+ $$('[data-q-edit]').forEach(b=>{b.onclick=()=>{const it=itemOf(b.dataset.qEdit);if(it)rowViewer(it,true)}});
+ $$('[data-q-approve]').forEach(b=>run(b,async()=>{
+  /* СКВОЗНОЕ «Одобрить»: (1) заявка в облаке (если была локальной — отправляется), (2) облако: исправленная строка + статус «Одобрена»,
+     (3) файл села на телефоне: дописать (NEW) или заменить по ID с проверкой индексов (EDIT). */
+  const uid=b.dataset.qApprove,it0=itemOf(uid);if(!it0)return;
+  if(QAUDIT.flags.has(uid)&&!confirm(T('qApproveForce')))return;
+  const src=QITEMS.get(uid)?.src;
+  if(src==='local'){
+   await sendPendingToIntake();
+   if(queueLocal().some(x=>x.uid===uid)){toast(T('qNeedCloud'));return}
+  }
+  const lr=await adminIntake({action:'list'});
+  const rm=(lr&&lr.ok?lr.items||[]:[]).find(x=>x.uid===uid);
+  if(!rm){toast(lr&&lr.ok?T('qNotInCloud'):intakeErrorText(lr));return}
+  const it=Object.assign({},it0,rm,{uid,file:rm.file});
+  let line=QEDIT.get(uid)||baseLineOf(it),orig=origOf(it);
+  if(QEDIT.has(uid)&&rm.row!==line){const u=await adminIntake({action:'updateRow',uid,row:line});if(!(u&&u.ok)){toast(intakeErrorText(u));return}}
+  if(rm.status==='Новая'&&!await setStatus(uid,'Одобрена'))return;
+  const r=await localOp(it.file,it.kind==='EDIT'?'EDIT':'NEW',line,orig);
+  if(r.ok&&r.line&&r.line!==line){QEDIT.set(uid,r.line);qeditSave();await adminIntake({action:'updateRow',uid,row:r.line});line=r.line}
+  toast(r.ok?T(r.duplicate?'queueAlreadyThereToast':(it.kind==='EDIT'?'qEditLocalOk':'qApproveOk')):T('qEditLocalFail',{error:qErr(r.error)}));
+  requestQueueMonitor();
+ }));
+ $$('[data-q-chatdel]').forEach(b=>run(b,async()=>{
+  const uid=b.dataset.qChatdel,it=itemOf(uid);if(!it)return;
+  const line=baseLineOf(it);
+  const loc=await localOp(it.file,'DELETE',line);
+  const gh=await ghPush(it.file,'DELETE',line);
+  const okL=!!loc.ok,okG=!!gh.ok;
+  if(okL&&okG){
+   const same=Array.from(QITEMS.values()).filter(x=>x.item.kind==='DELETE'&&x.item.file===it.file&&String(x.item.id||'').replace(/^0+/,'')===String(it.id||'').replace(/^0+/,'')&&x.src==='remote');
+   for(const x of same)await adminIntake({action:'setStatus',uid:x.item.uid,status:'Внесена'});
+   try{await loadVillageFile(it.file,true)}catch(e){}
+   banner(T('qChatDelOk',{tg:gh.tg?(gh.tg.ok?T('qTgOk'):T('qTgFail',{error:qErr(gh.tg.error)})):''}));
+   requestQueueMonitor();
+  }else banner(T('qChatDelFail',{phone:okL?'✔':'✖ '+qErr(loc.error),gh:okG?'✔':'✖ '+qErr(gh.error)}),true);
+ }));
+ $$('[data-q-file]').forEach(b=>run(b,async()=>{
+  const it=itemOf(b.dataset.qFile);if(!it)return;
+  const line=copyLineOf(it),orig=origOf(it);
+  /* буфер — ПЕРВЫМ делом, пока действует касание пользователя; файл на телефоне пишет сервер одновременно */
+  let clip;try{clip=navigator.clipboard.writeText(line)}catch(e){clip=Promise.reject(e)}
+  const op=localOp(it.file,it.kind==='EDIT'?'EDIT':'NEW',line,orig);
+  const [cl,fl]=await Promise.allSettled([clip,op]);
+  const fr=fl.status==='fulfilled'?fl.value:{ok:false,error:'network'};
+  toast(`${fr.ok?(fr.duplicate?'📄 '+T('queueAlreadyThereToast'):'📄 ✔'):'📄 ✖ '+qErr(fr.error)} · ${cl.status==='fulfilled'?'📋 ✔':'📋 ✖'}`);
+ }));
+ $$('[data-q-gh]').forEach(b=>run(b,async()=>{
+  const it=itemOf(b.dataset.qGh);if(!it)return;
+  const line=copyLineOf(it),orig=origOf(it);
+  banner(T('qGhWait'));
+  const r=await ghPush(it.file,it.kind==='EDIT'?'EDIT':'NEW',line,orig);
+  if(r&&r.ok){
+   const tg=r.tg?(r.tg.ok?T('qTgOk'):T('qTgFail',{error:qErr(r.tg.error)})):'';
+   banner(r.duplicate?T('queueAlreadyThereToast'):T('qGhOk',{commit:r.commit||'—',tg}));
+   if(await setStatus(it.uid,'Внесена'))requestQueueMonitor();
+  }else{banner(T('qGhFail',{error:qErr(r&&r.error)}),true)}
+ }));
+ $$('[data-q-done]').forEach(b=>run(b,async()=>{if(await setStatus(b.dataset.qDone,'Внесена'))requestQueueMonitor()}));
+ $$('[data-q-reject]').forEach(b=>run(b,async()=>{
+  const uid=b.dataset.qReject;QEDIT.delete(uid);qeditSave();
+  if(b.dataset.qSrc==='local'){removeQueueLocal(uid);toast(T('queueRejectedToast'));requestQueueMonitor()}
+  else if(await setStatus(uid,'Отклонена'))requestQueueMonitor();
+ }));
 }
 async function postSkipWaiting(){try{const reg=await navigator.serviceWorker?.ready;if(reg?.active)reg.active.postMessage({type:'SKIP_WAITING'});await reg?.update()}catch(e){}}
 /* ===== v5.3.0.4: ПЛАТФОРМЕННАЯ СТАТИСТИКА (счётчик в подвале «...Ещё») ===== */
@@ -2234,128 +2656,120 @@ function bindAdminHome(){const b=$('#adminHomeBtn');if(b)b.onclick=adminOpen}
    инструмента (аудит — кнопка 📊; «Контрольный паспорт строки» вырезан в v5.4.0.0), и новая
    кнопка «Сохранить token локально для фоновых уведомлений» (persistToken)
    для фонового робот-радара Service Worker (п.4 наряда). */
-function adminOpen(){
- const qr=clean(APP_CFG.qrShareUrl||'');
- const tokenStatus=S.token?T('tokenStatusSaved'):T('tokenStatusNotSet');
- const hasPersisted=!!storageGet('cart_admin_token_persist','');
- showModal(`<div class="modal-content admin-dark"><div class="admin-inner-head"><h2>${esc(T('adminPanelTitle'))}</h2></div><div class="admin-grid">
+function adminOpen(pocketOpen){
+ /* v1.0.0.0: наверху ровно 5 главных кнопок; весь инженерный шум спрятан в закрытый карман внизу (вход — по Мастер-паролю, строка 2). */
+ const rw=hasMaster(),po=(pocketOpen===true||storageGetSession('cart_eng_open','')==='1')&&rw;
+ showModal(`<div class="modal-content admin-dark"><div class="admin-inner-head"><h2>${esc(T('adminPanelTitle'))}</h2></div>
+  <div class="admin-top5">
    <button class="admin-blue" id="vipBtn">${esc(T('adminVipBtn'))}</button>
-   <button class="admin-green" id="queueBtn">${esc(T('adminQueueBtn'))}</button>
    <button class="admin-yellow" id="reportBtn">${esc(T('adminReportBtn'))}</button>
+   <button class="admin-green" id="auditBtn">${esc(T('adminDiagBtn'))}</button>
    <button class="admin-blue" id="refreshAdminBtn">${esc(T('adminRefreshBtn'))}</button>
-   <button class="admin-red quarantine-badge" id="quarantineBtn">${esc(T('adminQuarantineBtn'))}${quarantineBadgeCount()?`<span class="badge-count">${quarantineBadgeCount()}</span>`:''}</button>
-   <button class="admin-green" id="dupeBtn">${esc(T('adminDupeBtn'))}</button>
-   <button class="admin-yellow" id="backupBtn">${esc(T('adminBackupBtn'))}</button>
-   <button class="admin-green" id="auditBtn">${esc(T('adminAuditBtn'))}</button>
-   <button class="admin-blue" id="aliasBtn">${esc(T('aliasBtn'))}</button>
-  </div><hr>
-  <div class="admin-pockets">
-   <button class="${VAULT_ON?'secondary':'primary'} w100" id="rememberMeBtn">${esc(VAULT_ON?T('rememberMeForget'):T('rememberMe'))}</button>
-   <details class="search-pocket admin-pocket" id="pocketToken"><summary>${esc(T('adminPocketToken'))}${S.token?' ✓':''}</summary><div class="search-pocket-body form-grid">
-    <label>${esc(T('tokenFieldLabel',{status:tokenStatus}))}${pwField('adminToken',T('tokenPlaceholder'))}</label>
-    <button class="secondary" id="saveToken">${esc(T('saveTokenBtn'))}</button>
-    <button class="secondary" id="persistToken">${esc(hasPersisted?T('persistTokenClearBtn'):T('persistTokenBtn'))}</button>
-    <div class="hint">${esc(T('persistTokenHint'))}</div>
-   </div></details>
-   <details class="search-pocket admin-pocket" id="pocketCode"><summary>${esc(T('adminPocketCode'))}${adminCode()?' ✓':''}</summary><div class="search-pocket-body form-grid">
-    <label>${esc(T('intakeCodeLabel',{status:adminCode()?T('tokenStatusSaved'):T('tokenStatusNotSet')}))}${pwField('intakeCode',T('intakeCodePlaceholder'))}</label>
-    <button class="secondary" id="saveIntakeCode">${esc(T('intakeCodeSaveBtn'))}</button>
-   </div></details>
-   <details class="search-pocket admin-pocket" id="pocketQr"><summary>${esc(T('adminPocketQr'))}${qr?' ✓':''}</summary><div class="search-pocket-body form-grid">
-    <label>${esc(T('qrFieldLabel'))}<input id="qrUrl" type="url" value="${esc(qr)}" placeholder="${esc(T('qrFieldPlaceholder'))}"></label>
-    <button class="primary" id="saveQr">${esc(T('saveQrBtn'))}</button>
-   </div></details>
-   <details class="search-pocket admin-pocket" id="pocketHook"><summary>${esc(T('adminPocketHook'))}${intakeUrl()?' ✓':''}</summary><div class="search-pocket-body form-grid">
-    <div class="hint">${esc(T('hookHint'))}</div>
-    <label>${esc(T('hookLabel'))}<input id="hookUrl" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" value="${esc(intakeUrl())}" placeholder="https://script.google.com/macros/s/…/exec"></label>
-    <button class="primary" id="saveHook">${esc(T('hookSaveBtn'))}</button>
-   </div></details>
-   <details class="search-pocket admin-pocket" id="pocketTg"><summary id="tgSummary">${esc(T('adminPocketTelegram'))}</summary><div class="search-pocket-body form-grid">
-    <div class="hint">${esc(T('tgHint'))}</div>
-    <label>${esc(T('tgBotTokenLabel'))}${pwField('telegramBotToken','123456789:AA…')}</label>
-    <label>${esc(T('tgChatIdLabel'))}<input id="telegramChatId" inputmode="numeric" autocomplete="off" placeholder="123456789"></label>
-    <button class="primary" id="saveTelegram">${esc(T('tgSaveBtn'))}</button>
-    <button class="secondary" id="testTelegram">${esc(T('tgTestBtn'))}</button>
-   </div></details>
+   <button class="admin-red" id="forgetBtn">${esc(T('adminForgetBtn'))}</button>
   </div>
-  <div class="hint">${esc(T('hintSecret'))}</div>
+  <button class="mode-badge ${rw?'rw':'ro'}" id="modeBadge" type="button">${esc(T(rw?'modeRw':'modeRo'))}</button>
+  <button class="eng-toggle" id="engToggle" type="button">${esc(T('engPocketTitle'))} ${po?'▲':'🔒'}</button>
+  <div class="eng-pocket ${po?'':'hidden'}" id="engPocket">
+   <div class="admin-grid">
+    <button class="admin-green" id="queueBtn">${esc(T('adminQueueBtn'))}</button>
+    <button class="admin-red quarantine-badge" id="quarantineBtn">${esc(T('adminQuarantineBtn'))}${quarantineBadgeCount()?`<span class="badge-count">${quarantineBadgeCount()}</span>`:''}</button>
+    <button class="admin-green" id="dupeBtn">${esc(T('adminDupeBtn'))}</button>
+    <button class="admin-yellow" id="backupBtn">${esc(T('adminBackupBtn'))}</button>
+    <button class="admin-blue" id="aliasBtn">${esc(T('aliasBtn'))}</button>
+   </div>
+   <div class="admin-pockets">
+    <div class="secrets-box">
+     <div class="hint">${esc(T('secretsHint'))}</div>
+     <input type="text" id="secretsPath" value="${esc(storageGet('cart_secrets_path',''))}" placeholder="${esc(T('secretsPathPlaceholder'))}" autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="url">
+     <button class="primary big-action w100" id="readSecrets" type="button">${esc(T('secretsReadBtn'))}</button>
+     <div id="secretsResult" class="secrets-result"></div>
+    </div>
+    <button class="admin-yellow w100" id="pushGas" type="button">${esc(T('syncBtn'))}</button>
+   </div>
+   <div class="hint">${esc(T('hintSecret'))}</div>
+  </div>
   <div class="modal-actions"><button class="secondary" id="adminClose">${esc(T('adminClose'))}</button></div></div>`);
  bindAdminHome();bindEyes($('#modalRoot'));
- $('#adminClose').onclick=()=>{closeModal();S.view='home';S.tile=null;render()};
- $('#saveToken').onclick=()=>{
-  const v=clean($('#adminToken').value);if(!v){toast(T('tokenEmptyToast'));return}
-  S.token=v;storageSetSession('cart_github_pat',S.token);$('#adminToken').value='';toast(T('tokenSavedToast'));
-  relayAdminTokenToSw(S.token);vaultSync();
+ $('#adminClose').onclick=()=>{storageSetSession('cart_eng_open','0');masterLock();closeModal();S.view='home';S.tile=null;render()};
+ $('#modeBadge').onclick=()=>{if(hasMaster()){storageSetSession('cart_eng_open','0');masterLock().then(()=>{closeModal();adminOpen()})}else masterModal(()=>{closeModal();adminOpen()})};
+ $('#forgetBtn').onclick=async()=>{storageSetSession('cart_eng_open','0');await vaultForget();await masterLock();toast(T('rememberMeForgot'));closeModal();S.view='home';S.tile=null;render()};
+ $('#engToggle').onclick=()=>{
+  const pk=$('#engPocket');
+  if(!pk.classList.contains('hidden')){storageSetSession('cart_eng_open','0');pk.classList.add('hidden');$('#engToggle').textContent=T('engPocketTitle')+' 🔒';return}
+  if(hasMaster()){storageSetSession('cart_eng_open','1');pk.classList.remove('hidden');$('#engToggle').textContent=T('engPocketTitle')+' ▲'}
+  else masterModal(()=>{storageSetSession('cart_eng_open','1');closeModal();adminOpen(true)});
  };
- $('#saveIntakeCode').onclick=()=>{const v=clean($('#intakeCode').value);if(!v){toast(T('tokenEmptyToast'));return}saveAdminCode(normPhrase(v));$('#intakeCode').value='';toast(T('intakeCodeSavedToast'));closeModal();adminOpen()};
- $('#persistToken').onclick=()=>{
-  if(storageGet('cart_admin_token_persist','')){storageRemove('cart_admin_token_persist');toast(T('persistTokenClearedToast'));closeModal();adminOpen();return}
-  const v=S.token||clean($('#adminToken').value);
-  if(!v){toast(T('tokenEmptyToast'));return}
-  storageSet('cart_admin_token_persist',v);toast(T('persistTokenSavedToast'));relayAdminTokenToSw(v);closeModal();adminOpen();
- };
- $('#rememberMeBtn').onclick=async()=>{if(VAULT_ON){await vaultForget();toast(T('rememberMeForgot'))}else{ADMIN_PIN_OK=true;storageSet('cart_admin_pin_ok','1');idbRun('kv','readwrite',os=>os.put('1','admin_pin_ok'));if(await vaultSave())toast(T('rememberMeSaved'))}closeModal();adminOpen()};
- $('#saveQr').onclick=saveQrConfig;
- bindTelegramPocket();
- $('#saveHook').onclick=saveHookConfig;
- $('#vipBtn').onclick=vipMonitor;$('#queueBtn').onclick=requestQueueMonitor;$('#reportBtn').onclick=operationalReport;$('#refreshAdminBtn').onclick=refreshData;$('#quarantineBtn').onclick=quarantineMonitor;$('#dupeBtn').onclick=duplicateInspector;$('#backupBtn').onclick=doubleGitHubBackup;
- $('#auditBtn').onclick=auditModal;$('#aliasBtn').onclick=aliasToolModal;
+ $('#readSecrets').onclick=gated(readSecretsFile);
+ $('#pushGas').onclick=gated(pushGasCode);
+ $('#vipBtn').onclick=vipMonitor;$('#queueBtn').onclick=gated(requestQueueMonitor);$('#reportBtn').onclick=operationalReport;$('#refreshAdminBtn').onclick=refreshData;$('#quarantineBtn').onclick=gated(quarantineMonitor);$('#dupeBtn').onclick=gated(duplicateInspector);$('#backupBtn').onclick=gated(doubleGitHubBackup);
+ $('#auditBtn').onclick=auditModal;$('#aliasBtn').onclick=gated(aliasToolModal);
 }
 /* v5.4.0.0: карман Telegram. Токен бота и ID чата вводятся только здесь, уходят в облачный скрипт Google
    (по коду администратора) и хранятся в его свойствах. В браузере (и тем более у жителей) они не сохраняются. */
-const TG_ERR={bad_token_format:'неверный формат токена (должен быть вида 123456789:AA…)',bad_chat_format:'неверный формат ID чата (число или @имя)',forbidden:'код администратора не принят',tg_not_configured:'Telegram ещё не настроен',tg_failed:'Telegram отклонил запрос'};
+const TG_ERR={bad_token_format:'неверный формат токена (должен быть вида 123456789:AA…)',bad_chat_format:'неверный формат ID чата (число или @имя)',forbidden:'код администратора не принят',master_required:'Мастер-пароль не принят облаком (проверьте MASTER_CODE в Свойствах скрипта)',tg_not_configured:'Telegram ещё не настроен',tg_failed:'Telegram отклонил запрос',tg_bad_token:'Telegram не принял токен бота (проверьте токен)',tg_no_permission:'у Google-скрипта нет разрешения «Внешние сервисы»: запустите authorizeTelegram в редакторе и выпустите НОВУЮ версию развёртывания',tg_fetch_failed:'скрипт не смог связаться с Telegram',server_error:'сбой в Google-скрипте'};
 async function tgCall(action,extra){
- if(!intakeUrl()){toast(T('tgNeedUrlToast'));return null}
- const code=adminCode();if(!code){toast(T('tgNeedCodeToast'));return null}
- let r=null;try{r=await intakePost(Object.assign({action,code},extra||{}))}catch(e){r=null}
+ if(!intakeUrl()){banner(T('tgNeedUrlToast'),true);return null}
+ const code=adminCode();if(!code){banner(T('tgNeedCodeToast'),true);return null}
+ if(MUT_ACTIONS.indexOf(action)>=0&&!hasMaster()){banner(T('masterLockedToast'),true);return {ok:false,error:'master_required'}}
+ let r=null;try{r=await intakePost(Object.assign({action,code,master:MASTER_MEM},extra||{}))}catch(e){r=null}
  return r||{ok:false,error:'нет связи с облачным скриптом'};
 }
 function tgErrText(r){return (TG_ERR[r.error]||r.error||'?')+(r.detail?` (${r.detail})`:'')}
-function bindTelegramPocket(){
- const pk=$('#pocketTg');if(!pk)return;
- let checked=false;
- pk.addEventListener('toggle',async()=>{
-  if(!pk.open||checked)return;checked=true;
-  const r=await tgCall('tgStatus');
-  const sm=$('#tgSummary');if(sm&&r&&r.ok&&r.configured)sm.textContent=T('adminPocketTelegram')+' ✓';
- });
- $('#saveTelegram').onclick=async()=>{
-  const botToken=clean($('#telegramBotToken').value),chatId=clean($('#telegramChatId').value);
-  const r=await tgCall('setTelegram',{botToken,chatId});if(!r)return;
-  if(r.ok){$('#telegramBotToken').value='';$('#telegramChatId').value='';toast(T(r.configured?'tgSavedToast':'tgClearedToast'));const sm=$('#tgSummary');if(sm)sm.textContent=T('adminPocketTelegram')+(r.configured?' ✓':'')}
-  else toast(T('tgFailToast',{error:tgErrText(r)}));
- };
- $('#testTelegram').onclick=async()=>{
-  const r=await tgCall('testTelegram');if(!r)return;
-  toast(r.ok?T('tgTestOkToast'):T('tgFailToast',{error:tgErrText(r)}));
- };
-}
 /* v5.4.0.0: ссылка веб-приложения Google вводится в кармане и сама записывается в config.json (поле intakeWebhookUrl)
    через токен GitHub — сразу для всей области. После записи сайт проверяет, отвечает ли скрипт. */
-async function saveHookConfig(){
- const url=clean($('#hookUrl').value);
- if(!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(url)){toast(T('hookInvalidToast'));return}
- if(!S.token){toast(T('qrNoTokenToast'));return}
+/* v5.4.0.1: «Синхронизация Google Script»: локальный сервер (cartoteka_server.py) читает
+   google_apps_script_webhook.gs и кладёт текст в ячейку A1 листа «Код» Google Таблицы. */
+async function pushGasCode(){
+ const btn=$('#pushGas');if(btn)btn.disabled=true;
  try{
-  const cur=await readGitFile(CONFIG.PATH_CONFIG);let cfg={};try{cfg=JSON.parse(cur.content||'{}')}catch(e){cfg={}}
-  cfg.intakeWebhookUrl=url;cfg.schemaVersion=APP_VERSION;cfg.appVersion=APP_VERSION;cfg.generatedAt=new Date().toISOString().slice(0,10);
-  await githubWrite(CONFIG.PATH_CONFIG,JSON.stringify(cfg,null,2)+'\n','Админ: ссылка веб-хука Google-скрипта (intakeWebhookUrl)');
-  APP_CFG=Object.assign(APP_CFG,{intakeWebhookUrl:url});
-  let live=null;try{live=await intakePost({action:'stats'})}catch(e){live=null}
-  toast(T(live&&live.ok?'hookSavedLiveToast':'hookSavedSilentToast'));
-  const sm=$('#pocketHook>summary');if(sm)sm.textContent=T('adminPocketHook')+' ✓';
- }catch(e){toast(T('hookSaveFailToast'))}
+  let r=null;
+  try{const resp=await fetch('/__push_gas',{method:'POST',headers:srvHeaders(),body:JSON.stringify({master:MASTER_MEM}),cache:'no-store'});r=resp.ok?await resp.json():null}catch(e){r=null}
+  if(r&&r.error==='locked'){MSESS='';banner(T('masterLockedToast'),true)}
+  else if(r&&r.ok)banner(T('syncOk'));
+  else if(r)banner(T('syncFail',{error:r.detail||r.error||'?'}),true);
+  else banner(T('syncNoServer'),true);
+ }finally{if(btn)btn.disabled=false}
 }
-async function saveQrConfig(){
- const url=clean($('#qrUrl').value);
- if(!/^https?:\/\//i.test(url)){toast(T('qrUrlInvalidToast'));return}
- if(!S.token){toast(T('qrNoTokenToast'));return}
- try{
-  const cur=await readGitFile(CONFIG.PATH_CONFIG);let cfg={};try{cfg=JSON.parse(cur.content||'{}')}catch(e){cfg={}}
-  cfg.schemaVersion=APP_VERSION;cfg.appVersion=APP_VERSION;cfg.qrShareUrl=url;cfg.qrMode='admin-configured';cfg.generatedAt=new Date().toISOString().slice(0,10);
-  await githubWrite(CONFIG.PATH_CONFIG,JSON.stringify(cfg,null,2)+'\n','Админ: обновление QR URL');
-  APP_CFG=Object.assign(APP_CFG,cfg);toast(T('qrSavedToast'));
- }catch(e){toast(T('qrSaveFailToast'))}
+/* v1.0.0.0: чтение secrets.txt. Сервер (cartoteka_server.py) читает файл по пути администратора, режет строки по первому
+   двоеточию и отдаёт секреты странице: токен GitHub и Telegram живут только в памяти страницы, на экране — «••••». */
+const SECRET_FIELDS=['code','master','githubToken','repoName','branch','siteTest','siteProd','webhook','tgToken','tgChat','port','dbRoot','mode','sheetId'];
+function renderSecretsResult(found,problems,tgLine){
+ const el=$('#secretsResult');if(!el)return;
+ el.innerHTML=SECRET_FIELDS.map(k=>`<div class="sec-row ${found[k]?'ok':'miss'}"><span>${esc(T('sf_'+k))}</span><b>${found[k]?'••••••••':esc(T('secretsMissing'))}</b></div>`).join('')
+  +(problems||[]).map(p=>`<div class="sec-row miss"><span>${esc(T('secretsLine',{n:p.line}))}</span><b>${esc(T('sp_'+p.msg))}</b></div>`).join('')
+  +(tgLine?`<div class="sec-row ${tgLine.ok?'ok':'miss'}"><span>${esc(T('secretsTgCloud'))}</span><b>${esc(tgLine.text)}</b></div>`:'');
+}
+async function readSecretsFile(){
+ const btn=$('#readSecrets'),path=clean($('#secretsPath').value);
+ if(!path){banner(T('secretsNoPath'),true);return}
+ const code=adminCode();
+ if(!code){banner(T('secretsNoCode'),true);ADMIN_PIN_OK=false;closeModal();adminPinModal();return}
+ try{storageSet('cart_secrets_path',path)}catch(e){}
+ if(btn)btn.disabled=true;
+ let r=null;
+ try{const resp=await fetch('/__secrets',{method:'POST',headers:srvHeaders(),body:JSON.stringify({code,path,env:ENV.mode}),cache:'no-store'});r=resp.ok?await resp.json():null}catch(e){r=null}
+ if(btn)btn.disabled=false;
+ if(!r){banner(T('needServer'),true);return}
+ if(!r.ok){
+  const msg=T('se_'+(r.error||'x'));
+  if(r.problems)renderSecretsResult({},r.problems);
+  banner(T('secretsFail',{error:msg===('se_'+r.error)?r.error:msg}),true);return;
+ }
+ const sc=r.secret||{},pb=r.public||{};
+ if(sc.githubToken){S.token=sc.githubToken;storageSetSession('cart_github_pat',S.token);relayAdminTokenToSw(S.token);vaultSync()}
+ if(pb.intakeWebhookUrl)APP_CFG.intakeWebhookUrl=pb.intakeWebhookUrl;
+ if(pb.qrShareUrl)APP_CFG.qrShareUrl=pb.qrShareUrl;
+ if(pb.repositoryName)CONFIG.REPO=pb.repositoryName;
+ if(pb.branch)CONFIG.BRANCH=pb.branch;
+ PULT_KEEP.telegramBotToken=sc.tgToken||'';PULT_KEEP.telegramChatId=sc.tgChat||'';
+ let tgLine=null;
+ if(sc.tgToken&&sc.tgChat){
+  if(!intakeUrl())tgLine={ok:false,text:T('secretsTgNoHook')};
+  else{const t=await tgCall('setTelegram',{botToken:sc.tgToken,chatId:sc.tgChat});tgLine=t&&t.ok?{ok:true,text:T('secretsTgOk')}:{ok:false,text:t?tgErrText(t):'?'}}
+ }
+ renderSecretsResult(r.found||{},r.problems,tgLine);
+ const allOk=SECRET_FIELDS.every(k=>(r.found||{})[k])&&!(r.problems||[]).length&&(!tgLine||tgLine.ok);
+ banner(T(allOk?'bnSecrets':'bnSecretsPart'),!allOk);
 }
 async function auditModal(){
  await ensureAllLoaded();
@@ -2364,7 +2778,7 @@ async function auditModal(){
  bindAdminHome();$('#auditBack').onclick=adminOpen;
 }
 function setupTheme(){try{if(storageGet('cart_theme','')==='dark')document.body.classList.add('dark');const b=$('#themeBtn');if(!b)return;b.onclick=()=>{try{document.body.classList.toggle('dark');storageSet('cart_theme',document.body.classList.contains('dark')?'dark':'light')}catch(e){}}}catch(e){}}
-function setupAdmin(){let tm=0,suppress=false;const b=$('#infoBtn');if(!b)return;b.addEventListener('pointerdown',()=>{suppress=false;tm=setTimeout(()=>{suppress=true;if(ADMIN_PIN_OK)adminOpen();else adminPinModal()},3000)});['pointerup','pointercancel','pointerleave'].forEach(e=>b.addEventListener(e,()=>clearTimeout(tm)));b.onclick=()=>{if(!suppress)infoModal();suppress=false}}
+function setupAdmin(){let tm=0,suppress=false;const b=$('#infoBtn');if(!b)return;b.addEventListener('pointerdown',()=>{suppress=false;tm=setTimeout(async()=>{suppress=true;if(!(await serverAlive())){banner(T('needServer'),true);foreignAlarm();return}if(ADMIN_PIN_OK)adminOpen();else adminPinModal()},3000)});['pointerup','pointercancel','pointerleave'].forEach(e=>b.addEventListener(e,()=>clearTimeout(tm)));b.onclick=()=>{if(!suppress)infoModal();suppress=false}}
 function setupPWA(){
  try{
   window.addEventListener('beforeinstallprompt',e=>{try{e.preventDefault();S.installPrompt=e;const b=$('#installBanner');if(b){b.classList.remove('hidden');setTimeout(()=>b.classList.add('hidden'),30000)}}catch(err){}});
